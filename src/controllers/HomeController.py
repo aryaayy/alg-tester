@@ -5,8 +5,11 @@ class HomeController:
         self.appController = appController
         self.view = HomeView()
 
-        self.view.btn.clicked.connect(self.btnAction)
+        self.view.mapBtn.clicked.connect(self.mapBtnAction)
+        self.view.historyBtn.clicked.connect(self.historyBtnAction)
 
-    def btnAction(self):
-        self.view.showMessage()
-        self.appController.route("HelpView")
+    def mapBtnAction(self):
+        self.appController.route("MapView")
+
+    def historyBtnAction(self):
+        self.appController.route("HistoryView")

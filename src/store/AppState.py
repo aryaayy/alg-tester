@@ -11,6 +11,8 @@ class AppState:
             cls._instance.width = 1280
             cls._instance.height = 720
             cls._instance.isLightTheme = True
+            cls._instance.indoDbPath = "D:/Arya/Skripsi/alg_tester/database/indonesia.db"
+            cls._instance.appDbPath = "D:/Arya/Skripsi/alg_tester/database/app.db"
         return cls._instance
 
 # Buat variabel globalnya

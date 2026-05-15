@@ -1,6 +1,8 @@
 from src.views.MainWindow import MainWindow
 from src.controllers.HomeController import HomeController
 from src.controllers.HelpController import HelpController
+from src.controllers.MapController import MapController
+from src.controllers.HistoryController import HistoryController
 from src.store.AppState import state
 
 class AppController:
@@ -30,6 +32,10 @@ class AppController:
             self.showHome()
         elif target == "HelpView":
             self.showHelp()
+        elif target == "MapView":
+            self.showMap()
+        elif target == "HistoryView":
+            self.showHistory()
 
     def showHome(self):
         self.homeController = HomeController(self)
@@ -38,3 +44,11 @@ class AppController:
     def showHelp(self):
         self.helpController = HelpController(self)
         self.mainWindow.setCentralWidget(self.helpController.view)
+
+    def showMap(self):
+        self.mapController = MapController(self)
+        self.mainWindow.setCentralWidget(self.mapController.view)
+
+    def showHistory(self):
+        self.historyController = HistoryController(self)
+        self.mainWindow.setCentralWidget(self.historyController.view)
