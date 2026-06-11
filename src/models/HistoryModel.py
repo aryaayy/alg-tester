@@ -19,9 +19,9 @@ class HistoryModel:
                 (alg, source_osmid, dest_osmid, distance, exec_time, exec_space, vis_nodes, created_at)
                 )
             
-    def fetch_by_id(self, history_id):
-        self.c.execute("SELECT * FROM histories WHERE id=?", (history_id,))
-        return self.c.fetchone()
+    def fetch_latest_id(self, created_at, alg):
+        self.c.execute("SELECT history_id FROM histories WHERE created_at=? AND alg=? ORDER BY history_id DESC LIMIT 1", (created_at, alg))
+        return self.c.fetchone()[0]
     
     def fetch_all(self):
         """Fetches all history records and returns them as a list of dictionaries.""" 
@@ -39,8 +39,8 @@ class HistoryModel:
         history_list = []
         unique_dates = []
         for row in rows:
-            if row[8] not in unique_dates:
-                unique_dates.append(row[8])
+            if (row[8], row[2], row[3]) not in unique_dates:
+                unique_dates.append((row[8], row[2], row[3]))
 
             history_list.append({
                 "history_id": row[0],

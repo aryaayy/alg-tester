@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox, QMessageBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox, QMessageBox, QLabel, QSpinBox
 from PySide6.QtCore import QUrl, Qt
 
 class MapView(QWidget):
@@ -10,7 +10,7 @@ class MapView(QWidget):
         
         self.web_view = QWebEngineView()
         
-        # Security Settings to allow JS and WebChannel
+        # Security Settings
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
@@ -18,9 +18,14 @@ class MapView(QWidget):
 
         # Connect the communication channel
         self.web_view.page().setWebChannel(web_channel)
-
-        # Load the HTML map
         self.web_view.setUrl(QUrl.fromLocalFile(map_html_path))
+
+        # ==========================================
+        # CONTAINER 1: Routing Controls (Base Map)
+        # ==========================================
+        self.routing_container = QWidget()
+        routing_layout = QVBoxLayout(self.routing_container)
+        routing_layout.setContentsMargins(10, 10, 10, 10) # add padding
 
         self.bmsspCkBox = QCheckBox(text="BMSSP")
         self.dijkstraCkBox = QCheckBox(text="Dijkstra")
@@ -36,14 +41,61 @@ class MapView(QWidget):
         optionsLayout.addWidget(self.bidijkstraCkBox)
         optionsLayout.addWidget(self.biastarCkBox)
 
-        # Layout
+        self.spinbox_label = QLabel("Jumlah Iterasi:")
+        
+        self.loop_count = QSpinBox()
+        self.loop_count.setRange(1, 20) 
+        self.loop_count.setValue(10)       
+        self.loop_count.setSingleStep(1)
+
+        spinBoxLayout = QHBoxLayout()
+        spinBoxLayout.addWidget(self.spinbox_label)
+        spinBoxLayout.addWidget(self.loop_count)
+        spinBoxLayout.setStretch(1, 1)
+
+        routing_layout.addLayout(optionsLayout)
+        routing_layout.addLayout(spinBoxLayout)
+        routing_layout.addWidget(self.startButton)
+
+        # ==========================================
+        # CONTAINER 2: Reset Controls (Animated Map)
+        # ==========================================
+        self.reset_container = QWidget()
+        reset_layout = QVBoxLayout(self.reset_container)
+        reset_layout.setContentsMargins(0, 0, 0, 0) # Remove padding
+
+        self.resetButton = QPushButton("Kembali ke Peta Awal")
+        reset_layout.addWidget(self.resetButton)
+        
+        # Hide the reset button by default when the app opens
+        self.reset_container.setVisible(False)
+
+        # ==========================================
+        # MAIN LAYOUT
+        # ==========================================
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 5)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.web_view)
-        layout.addWidget(self.startButton)
-        layout.addLayout(optionsLayout)
-        layout.addWidget(self.startButton)
+        
+        # Add both containers to the main layout
+        layout.addWidget(self.routing_container)
+        layout.addWidget(self.reset_container)
+        layout.setStretch(0, 1)
     
+    # --- NEW METHODS TO TOGGLE THE UI ---
+    
+    def set_mode_animated(self):
+        """Hides the checkboxes and shows the Reset button."""
+        self.routing_container.setVisible(False)
+        self.reset_container.setVisible(True)
+
+    def set_mode_base(self):
+        """Hides the Reset button and brings back the checkboxes."""
+        self.routing_container.setVisible(True)
+        self.reset_container.setVisible(False)
+
+    # ------------------------------------
+
     def get_selected_algorithms(self):
         active = []
         if self.dijkstraCkBox.isChecked(): active.append("dijkstra")
@@ -52,6 +104,9 @@ class MapView(QWidget):
         if self.biastarCkBox.isChecked(): active.append("biastar")
         if self.bmsspCkBox.isChecked(): active.append("bmssp")
         return active
+    
+    def get_loop_count(self):
+        return self.loop_count.value()
 
     def show_message(self, icon, title, text):
         msg = QMessageBox(self)
@@ -62,7 +117,6 @@ class MapView(QWidget):
 
     def show_question(self, icon, title, text):
         msg = QMessageBox(self)
-        # msg.setIcon(icon)
         msg.setWindowTitle(title)
         msg.setText(text)
         msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)

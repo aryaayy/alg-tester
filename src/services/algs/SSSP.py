@@ -10,6 +10,9 @@ class AStar(PathFinder):
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
+        visited = []
+        came_from = {}
+
         def run_alg():
             self.metrics.vis_nodes = 0
             
@@ -41,6 +44,7 @@ class AStar(PathFinder):
             while frontier:
                 current_f_score, current_node = heapq.heappop(frontier)
                 
+                visited.append(current_node)
                 self.metrics.vis_nodes += 1
                 
                 if current_f_score > f_score.get(current_node, float('inf')):
@@ -75,6 +79,7 @@ class AStar(PathFinder):
                         f_score[target_node] = new_g_score + h
                         
                         heapq.heappush(frontier, (f_score[target_node], target_node))
+                        came_from[target_node] = current_node
                         
             return float('inf')
         
@@ -82,18 +87,43 @@ class AStar(PathFinder):
             result = run_alg()
 
         conn.close()
-        return result
+        final_path = []
+        
+        # Check if we actually found a way to the destination
+        if D in came_from or D == S:
+            current = D
+            # Work backwards from the destination to the start
+            while current != S:
+                final_path.append(current)
+                current = came_from[current]
+            
+            # Don't forget to add the start node!
+            final_path.append(S)
+            
+            # Reverse it so it goes Source -> Destination
+            final_path.reverse() 
+
+        return {
+            "distance": result,
+            "visited": visited,
+            "final_path": final_path
+        }
 
 class BiAStar(PathFinder):
     def find_shortest_path(self, S, D, db_path="sumatra.db"):
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
+        visited = []
+        parent_f = {}
+        parent_b = {}
+
         def run_alg():
+            shared = None
             self.metrics.vis_nodes = 0
             
             if S == D:
-                return 0
+                return (0, S)
                 
             # 1. Fetch Source and Destination coordinates upfront
             c.execute("SELECT y, x FROM nodes WHERE osmid = ?", (S,))
@@ -103,7 +133,7 @@ class BiAStar(PathFinder):
             d_coords = c.fetchone()
             
             if not s_coords or not d_coords:
-                return float('inf')
+                return (float('inf'), shared)
                 
             s_lat, s_lon = s_coords
             t_lat, t_lon = d_coords
@@ -135,6 +165,7 @@ class BiAStar(PathFinder):
                     f_u, g_u, u, u_lat, u_lon = heapq.heappop(frontier_f)
 
                     if g_u <= g_f.get(u, float('inf')):
+                        visited.append(u)
                         self.metrics.vis_nodes += 1
                         
                         h_u_t = haversine(u_lat, u_lon, t_lat, t_lon) # h(u)
@@ -160,9 +191,11 @@ class BiAStar(PathFinder):
                                     g_f[v] = new_g
                                     f_v = new_g + haversine(v_lat, v_lon, t_lat, t_lon)
                                     heapq.heappush(frontier_f, (f_v, new_g, v, v_lat, v_lon))
+                                    parent_f[v] = u
                                 
                                 if g_f.get(v, float('inf')) + g_b.get(v, float('inf')) < L:
                                     L = g_f[v] + g_b[v]
+                                    shared = v
 
                 # --- BACKWARD SEARCH ---
                 if frontier_b:
@@ -171,6 +204,7 @@ class BiAStar(PathFinder):
                     f_u, g_u, u, u_lat, u_lon = heapq.heappop(frontier_b)
                     
                     if g_u <= g_b.get(u, float('inf')):
+                        visited.append(u)
                         self.metrics.vis_nodes += 1
                         
                         h_u_s = haversine(u_lat, u_lon, s_lat, s_lon) # h~(u)
@@ -196,28 +230,70 @@ class BiAStar(PathFinder):
                                     g_b[v] = new_g
                                     f_v = new_g + haversine(v_lat, v_lon, s_lat, s_lon)
                                     heapq.heappush(frontier_b, (f_v, new_g, v, v_lat, v_lon))
+                                    parent_b[v] = u
                                     
                                 if g_f.get(v, float('inf')) + g_b.get(v, float('inf')) < L:
                                     L = g_f[v] + g_b[v]
+                                    shared = v
 
-            return L if L != float('inf') else float('inf')
+            return (L, shared) if L != float('inf') else float('inf')
         
         with self.metrics:
-            result = run_alg()
+            result, shared = run_alg()
 
         conn.close()
-        return result
+        final_path = []
+        temp_final_b = []
+        temp_final_f = []
+        
+        # Check if we actually found a way to the destination
+        if shared:
+            if S == D:
+                final_path.append(S)
+            else:
+                current = shared
+                # Work backwards from the destination to the start
+                while current != D:
+                    temp_final_b.append(current)
+                    current = parent_b[current]
+                
+                # Don't forget to add the start node!
+                temp_final_b.append(D)
+
+                current = shared
+                # Work backwards from the destination to the start
+                while current != S:
+                    if temp_final_f != shared:
+                        temp_final_f.append(current)
+                    current = parent_f[current]
+                
+                # Don't forget to add the start node!
+                temp_final_f.append(S)
+                temp_final_f.reverse()
+
+                final_path = temp_final_f + temp_final_b
+
+        return {
+            "distance": result,
+            "visited": visited,
+            "final_path": final_path
+        }
     
 class BiDijkstra(PathFinder):
     def find_shortest_path(self, S, D, db_path="sumatra.db"):
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
+        visited = []
+        parent_f = {}
+        parent_b = {}
+
         def run_alg():
+            shared = None
             self.metrics.vis_nodes = 0
             
             if S == D:
-                return 0
+                return (0, S)
                 
             mu = float('inf')
             
@@ -244,13 +320,14 @@ class BiDijkstra(PathFinder):
                     current_dist_f, u = heapq.heappop(frontier_f)
                     
                     if current_dist_f <= dist_f.get(u, float('inf')):
+                        visited.append(u)
                         closed_f.add(u)
                         self.metrics.vis_nodes += 1
                         
                         d_u_s = current_dist_f
                         
                         if d_u_s + d_u_t >= mu:
-                            return mu
+                            return (mu, shared)
                             
                         # Successors: Where 'u' is the source
                         c.execute("""
@@ -270,22 +347,25 @@ class BiDijkstra(PathFinder):
                                 if new_dist < dist_f.get(v, float('inf')):
                                     dist_f[v] = new_dist
                                     heapq.heappush(frontier_f, (new_dist, v))
+                                    parent_f[v] = u
                         
                             if v in closed_b:
                                 mu = min(mu, dist_f[u] + w + dist_b.get(v, float('inf')))
+                                shared = v
 
                 # --- BACKWARD SEARCH ---
                 if frontier_b:
                     current_dist_b, u = heapq.heappop(frontier_b)
                     
                     if current_dist_b <= dist_b.get(u, float('inf')):
+                        visited.append(u)
                         closed_b.add(u)
                         self.metrics.vis_nodes += 1
                         
                         d_u_t = current_dist_b
                         
                         if d_u_s + d_u_t >= mu:
-                            return mu
+                            return (mu, shared)
                             
                         # Predecessors: Where 'u' is the target
                         c.execute("""
@@ -305,18 +385,56 @@ class BiDijkstra(PathFinder):
                                 if new_dist < dist_b.get(v, float('inf')):
                                     dist_b[v] = new_dist
                                     heapq.heappush(frontier_b, (new_dist, v))
+                                    parent_b[v] = u
                         
                             if v in closed_f:
                                 mu = min(mu, dist_b[u] + w + dist_f.get(v, float('inf')))
+                                shared = v
 
-            return mu if mu != float('inf') else float('inf')
+            return (mu, shared) if mu != float('inf') else float('inf')
         
         with self.metrics:
-            result = run_alg()
+            result, shared = run_alg()
 
         conn.close()
-        return result
-    
+
+        final_path = []
+        temp_final_b = []
+        temp_final_f = []
+        
+        # Check if we actually found a way to the destination
+        if shared:
+            if S == D:
+                final_path.append(S)
+            else:
+                current = shared
+                # Work backwards from the destination to the start
+                while current != D:
+                    temp_final_b.append(current)
+                    current = parent_b[current]
+                
+                # Don't forget to add the start node!
+                temp_final_b.append(D)
+
+                current = shared
+                # Work backwards from the destination to the start
+                while current != S:
+                    if temp_final_f != shared:
+                        temp_final_f.append(current)
+                    current = parent_f[current]
+                
+                # Don't forget to add the start node!
+                temp_final_f.append(S)
+                temp_final_f.reverse()
+
+                final_path = temp_final_f + temp_final_b
+
+        return {
+            "distance": result,
+            "visited": visited,
+            "final_path": final_path
+        }
+
 class BMSSPDS:
     def __init__(self, M, B):
         self.M = max(1, M)
@@ -349,12 +467,15 @@ class BMSSPDS:
     def is_empty(self):
         return len(self.heap) == 0
 
+
 class BMSSP(PathFinder):
     def __init__(self):
         super().__init__()
         self.dist_hat = {}
         self.c = None  # We will store the DB cursor here for recursive access
-    
+        self.visited = []
+        self.came_from = {}
+
     def _find_pivots(self, B, S, k):
         W = set(S)
         W_prev = set(S)
@@ -362,6 +483,7 @@ class BMSSP(PathFinder):
         for i in range(1, k + 1):
             W_curr = set()
             for u in W_prev:
+                self.visited.append(u)
                 self.metrics.vis_nodes += 1
                 
                 # SQLite Successors
@@ -383,6 +505,7 @@ class BMSSP(PathFinder):
                         self.dist_hat[v] = dist_u + w_uv
                         if dist_u + w_uv < B:
                             W_curr.add(v)
+                            self.came_from[v] = u
             
             W.update(W_curr)
             W_prev = W_curr
@@ -409,6 +532,7 @@ class BMSSP(PathFinder):
                 continue
                 
             U0.add(u)
+            self.visited.append(u)
             self.metrics.vis_nodes += 1
             
             # SQLite Successors
@@ -427,6 +551,7 @@ class BMSSP(PathFinder):
                 if new_dist <= self.dist_hat.get(v, float('inf')) and new_dist < B:
                     self.dist_hat[v] = new_dist
                     heapq.heappush(H, (new_dist, v))
+                    self.came_from[v] = u
                     
         if len(U0) <= k:
             return B, U0
@@ -456,12 +581,16 @@ class BMSSP(PathFinder):
         while len(U) < max_u_size and not D.is_empty():
             Bi, Si = D.pull()
             
+            if self.best_distance_to_dest != float('inf') and Bi >= self.best_distance_to_dest: 
+                break
+
             Bi_prime, Ui = self._bmssp_recursive(l - 1, Bi, Si, k, t)
             current_B_prime = Bi_prime  
             U.update(Ui)
             
             K_set = set()
             for u in Ui:
+                self.visited.append(u)
                 self.metrics.vis_nodes += 1
                 
                 # SQLite Successors
@@ -477,13 +606,24 @@ class BMSSP(PathFinder):
                     w_uv = float(w_uv)
                     
                     new_dist = self.dist_hat.get(u, float('inf')) + w_uv
+
+                    # --- THE PRUNING CONDITION ---
+                    if self.best_distance_to_dest != float('inf') and new_dist >= self.best_distance_to_dest:
+                        continue # Skip this branch, it's already too long!
+
                     if new_dist <= self.dist_hat.get(v, float('inf')):
                         self.dist_hat[v] = new_dist
+
+                        # --- UPDATE THE GLOBAL BOUND IF WE HIT DESTINATION ---
+                        if v == self.target_node:
+                            self.best_distance_to_dest = new_dist
                         
                         if Bi <= new_dist < B:
                             D.insert((new_dist, v))
                         elif Bi_prime <= new_dist < Bi:
                             K_set.add((new_dist, v))
+
+                        self.came_from[v] = u
                             
             batch_items = K_set.union({(self.dist_hat.get(x, float('inf')), x) for x in Si if Bi_prime <= self.dist_hat.get(x, float('inf')) < Bi})
             D.batch_prepend(batch_items)
@@ -504,8 +644,12 @@ class BMSSP(PathFinder):
         def run_alg():
             self.metrics.vis_nodes = 0
             
-            self.dist_hat = {} # Start entirely empty
+            self.dist_hat = {} 
             self.dist_hat[S] = 0
+
+            # --- NEW: INITIALIZE THE EARLY STOPPING VARIABLES HERE ---
+            self.target_node = D 
+            self.best_distance_to_dest = float('inf') # Starts at infinity!
             
             # Fetch the total number of nodes in the graph to calculate 'k' and 't' bounds
             self.c.execute("SELECT COUNT(*) FROM nodes")
@@ -526,13 +670,36 @@ class BMSSP(PathFinder):
             result = run_alg()
 
         conn.close()
-        return result
+        final_path = []
+        
+        # Check if we actually found a way to the destination
+        if D in self.came_from or D == S:
+            current = D
+            # Work backwards from the destination to the start
+            while current != S:
+                final_path.append(current)
+                current = self.came_from[current]
+            
+            # Don't forget to add the start node!
+            final_path.append(S)
+            
+            # Reverse it so it goes Source -> Destination
+            final_path.reverse() 
+
+        return {
+            "distance": result,
+            "visited": list(dict.fromkeys(self.visited)), 
+            "final_path": final_path
+        }
     
 class Dijkstra(PathFinder):
     # Removed G from parameters, added db_path for flexibility
     def find_shortest_path(self, S, D, db_path="sumatra.db"): 
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
+
+        visited = []
+        came_from = {}
 
         def run_alg():
             self.metrics.vis_nodes = 0
@@ -542,11 +709,12 @@ class Dijkstra(PathFinder):
             
             distance[S] = 0
             heapq.heappush(frontier, (0, S))
-            
+
             while frontier:
                 current_distance, current_node = heapq.heappop(frontier)
                 
                 self.metrics.vis_nodes += 1
+                visited.append(current_node)
                 
                 # Skip if we already found a shorter path to this node
                 if current_distance > distance.get(current_node, float('inf')):
@@ -579,6 +747,7 @@ class Dijkstra(PathFinder):
                     if new_distance < distance.get(n, float('inf')):
                         distance[n] = new_distance
                         heapq.heappush(frontier, (new_distance, n))
+                        came_from[n] = current_node
                         
             return float('inf')
         
@@ -586,4 +755,25 @@ class Dijkstra(PathFinder):
             result = run_alg()
 
         conn.close()
-        return result
+
+        final_path = []
+        
+        # Check if we actually found a way to the destination
+        if D in came_from or D == S:
+            current = D
+            # Work backwards from the destination to the start
+            while current != S:
+                final_path.append(current)
+                current = came_from[current]
+            
+            # Don't forget to add the start node!
+            final_path.append(S)
+            
+            # Reverse it so it goes Source -> Destination
+            final_path.reverse() 
+
+        return {
+            "distance": result,
+            "visited": visited,
+            "final_path": final_path
+        }

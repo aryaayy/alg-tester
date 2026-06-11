@@ -3,6 +3,8 @@ import sqlite3
 import folium
 from scipy.spatial import cKDTree
 from PySide6.QtCore import QObject, Slot, Signal
+import json
+from branca.element import Element
 
 class ClickReceiver(QObject):
     # Use 'object' instead of 'int' to allow unlimited-size Python integers
@@ -56,7 +58,7 @@ class MapService:
         distance, index = self.tree.query((lon, lat), k=1)
         return self.node_ids[index]
 
-    def generate_base_map(self, save_path="src/assets/temp_indonesia_map.html"):
+    def generate_base_map(self, save_path="src/assets/temp/temp_indonesia_map.html"):
         """Generates the Folium map and returns the absolute path to the HTML file."""
         m = folium.Map(location=[-0.7893, 113.9213], zoom_start=5, tiles="CartoDB positron")
 
@@ -143,6 +145,56 @@ class MapService:
         m.get_root().header.add_child(folium.Element(cursor_style))
         m.get_root().html.add_child(folium.Element(click_js))
         
+        abs_path = os.path.abspath(save_path)
+        m.save(abs_path)
+        return abs_path
+    
+    def generate_animated_map(self, center_lat, center_lon, final_path_coords, traversal_coords, save_path="src/assets/temp/temp_animated_map.html"):
+        """Generates the animated Folium map and returns the HTML file path."""
+        print(f"Building animated map with {len(traversal_coords)} dots...")
+
+        # 1. Create the base map
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=13, tiles="CartoDB positron")
+        
+        # 2. Draw the Final Winning Path
+        if final_path_coords:
+            folium.PolyLine(final_path_coords, color="#28a745", weight=5, opacity=0.8).add_to(m)
+
+        # 3. Inject the JavaScript Animation
+        if traversal_coords:
+            coords_json = json.dumps(traversal_coords)
+            js_code = f"""
+            <script>
+            document.addEventListener('DOMContentLoaded', function() {{
+                setTimeout(function() {{
+                    var mapKey = Object.keys(window).find(key => key.startsWith('map_'));
+                    var myMap = window[mapKey];
+                    if (!myMap) return;
+
+                    var traversalCoords = {coords_json}; 
+                    var index = 0;
+                    var nodesPerTick = 15; 
+
+                    var timer = setInterval(function() {{
+                        for(var i = 0; i < nodesPerTick; i++) {{
+                            if (index >= traversalCoords.length) {{
+                                clearInterval(timer); 
+                                break;
+                            }}
+                            L.circleMarker(traversalCoords[index], {{
+                                radius: 3, color: '#007bff', fillColor: '#007bff',
+                                fillOpacity: 0.15, weight: 0
+                            }}).addTo(myMap);
+                            index++;
+                        }}
+                    }}, 20); 
+                }}, 1000); 
+            }});
+            </script>
+            """
+            m.get_root().html.add_child(Element(js_code))
+
+        # 4. Save and return the path
         abs_path = os.path.abspath(save_path)
         m.save(abs_path)
         return abs_path

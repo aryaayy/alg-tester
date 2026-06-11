@@ -1,6 +1,6 @@
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWidgets import QStackedWidget, QMessageBox
-from PySide6.QtCore import QThread, Signal # ADDED QThread and Signal
+from PySide6.QtCore import QObject, QThread, Signal # ADDED QThread and Signal
 
 from src.views.MapView import MapView
 from src.views.LoadingView import LoadingView
@@ -10,8 +10,15 @@ from src.services.algs.SSSP import Dijkstra, BiDijkstra, AStar, BiAStar, BMSSP
 from src.services.RoutingService import RoutingThread
 
 from src.models.HistoryModel import HistoryModel
+from src.models.PathModel import PathModel
 
 from src.store.AppState import state
+
+import folium
+import json
+import os
+from PySide6.QtCore import QUrl
+from branca.element import Element
 
 class MapLoaderThread(QThread):
     service_ready = Signal(object) 
@@ -33,21 +40,22 @@ class MapLoaderThread(QThread):
         # Now it is perfectly safe to emit!
         self.service_ready.emit(service)
 
-class MapController:
+class MapController(QObject):
+    app_ready = Signal() 
+
     def __init__(self, app_controller):
+        super().__init__() # Required for QObject
         self.app_controller = app_controller
         self.main_thread = QThread.currentThread() 
         
-        self.view = QStackedWidget()
-        self.loading_view = LoadingView()
-        self.view.addWidget(self.loading_view)
-        self.view.setCurrentWidget(self.loading_view)
+        # WE DELETED THE QStackedWidget AND LoadingView FROM HERE!
+        # MapController now ONLY cares about the map.
+        self.view = None 
         
-        # Pass the main_thread down into the worker
+        # Start the background thread immediately when the app opens
         self.loader_thread = MapLoaderThread(self.main_thread)
         self.loader_thread.service_ready.connect(self.on_map_data_loaded)
         self.loader_thread.start()
-
 
     def on_map_data_loaded(self, service):
         print("[Main Thread] Data loaded, setting up UI...")
@@ -63,17 +71,15 @@ class MapController:
         self.map_service.receiver.node_selected_info.connect(self.on_node_selected)
         self.map_service.receiver.node_selected.connect(self.set_node_selected)
         
-        html_path = self.map_service.generate_base_map()
-        self.map_view = MapView(self.channel, html_path)
-        
-        self.view.addWidget(self.map_view)
-        self.view.setCurrentWidget(self.map_view)
+        self.base_html_path = self.map_service.generate_base_map()
+        self.view = MapView(self.channel, self.base_html_path)
+        self.view.startButton.clicked.connect(self.start_routing)
+        self.view.resetButton.clicked.connect(self.reset_to_base_map)
 
-        self.map_view.startButton.clicked.connect(self.start_routing)
         self.source_osmid = None
         self.dest_osmid = None
 
-        print("Map loaded and displayed.")
+        self.app_ready.emit()
 
     def on_node_selected(self, node_type, lat, lon, osmid):
         print(f"[{node_type.upper()}] Lat: {lat}, Lon: {lon} | OSMID: {osmid}")
@@ -86,23 +92,25 @@ class MapController:
 
     def start_routing(self):
         if self.source_osmid == None or self.dest_osmid == None:
-            self.map_view.show_message(QMessageBox.Icon.Critical, "Gagal!", "Pilih simpul asal dan tujuan!")
+            self.view.show_message(QMessageBox.Icon.Critical, "Gagal!", "Pilih simpul asal dan tujuan!")
             return
 
-        active_algs = self.map_view.get_selected_algorithms()
+        active_algs = self.view.get_selected_algorithms()
+        loop_count = self.view.get_loop_count()
 
         if not active_algs:
-            self.map_view.show_message(QMessageBox.Icon.Critical, "Gagal!", "Pilih paling tidak 1 algoritma!")
+            self.view.show_message(QMessageBox.Icon.Critical, "Gagal!", "Pilih paling tidak 1 algoritma!")
             return
 
-        self.map_view.show_message(QMessageBox.Icon.Information, "Sedang Memproses", "Algoritma sedang memproses rute di latar belakang. Silakan tunggu...")
+        self.view.show_message(QMessageBox.Icon.Information, "Sedang Memproses", "Algoritma sedang memproses rute di latar belakang. Silakan tunggu...")
 
         # 3. Create and Start the Background Thread
         self.routing_thread = RoutingThread(
             self.source_osmid, 
             self.dest_osmid, 
             state.indoDbPath, 
-            active_algs
+            active_algs,
+            loop_count
         )
         
         # Connect the signal to receive the results when it finishes
@@ -115,7 +123,7 @@ class MapController:
     def on_routing_finished(self, results):
         print("\n[Main Thread] Routing Complete! Results:")
         
-        text = ""
+        text = "SUMMARY\n\n"
         for alg_name, data in results.items():
             print(f"--- {alg_name.upper()} ---")
             print(f"Distance: {round(data['distance'], 2)} meters")
@@ -123,11 +131,52 @@ class MapController:
             text += f"""--- {alg_name.upper()} ---\nDistance: {round(data['distance'], 2)} meters\nMetrics: {data['metrics']}\n\n"""
             
         # You can now trigger your MapService to draw the winning path!
-        answer = self.map_view.show_question(None, "Sukses!", f"{text}Pencarian rute selesai! Simpan riwayat?")
+        # answer = self.view.show_question(None, "Sukses!", f"{text}Pencarian rute selesai! Simpan riwayat?")
+        answer = self.view.show_message(QMessageBox.Icon.Information, "Sukses!", f"{text}Pencarian rute selesai! Simpan riwayat?")
 
-        if(answer == QMessageBox.StandardButton.Yes):
-            for alg_name, data in results.items():
-                history = HistoryModel()
-                history.insert(alg_name.upper(), self.source_osmid, self.dest_osmid, data['distance'], data['metrics']['exec_time'], data['metrics']['exec_space'], data['metrics']['vis_nodes'], data["created_at"])
+        # if(answer == QMessageBox.StandardButton.Yes):
+            # for alg_name, data in results.items():
+            #     history = HistoryModel()
+            #     history.insert(alg_name.upper(), self.source_osmid, self.dest_osmid, data['distance'], data['metrics']['exec_time'], data['metrics']['exec_space'], data['metrics']['vis_nodes'], data["created_at"])
+            #     history_id = history.fetch_latest_id(data['created_at'], alg_name.upper())
 
-            self.app_controller.route("HistoryView")
+            #     paths = PathModel()
+            #     traversal_coords = paths.to_coords(data['traversal_path'])
+            #     final_path_coords = paths.to_coords(data['final_path'])
+            #     paths.insert_traversal(history_id, traversal_coords)
+            #     paths.insert_final_path(history_id, final_path_coords)
+
+        self.app_controller.route("HistoryView")
+
+    def display_animated_map(self, center_lat, center_lon, final_path_coords, traversal_coords):
+        """Called by HistoryController to show an animated route."""
+        
+        # 1. Ask the Service to build the map
+        map_file_path = self.map_service.generate_animated_map(
+            center_lat, 
+            center_lon, 
+            final_path_coords, 
+            traversal_coords
+        )
+        
+        # 2. Tell the View to load the file
+        self.view.web_view.load(QUrl.fromLocalFile(map_file_path))
+        self.view.set_mode_animated()
+
+    def reset_to_base_map(self):
+        """Reloads the clean base map and resets all clicking variables."""
+        print("Returning to base map...")
+        
+        # A. Clear the selected nodes
+        self.source_osmid = None
+        self.dest_osmid = None
+        
+        # B. CRITICAL: Reset the Python click receiver count
+        # If we don't do this, your next click will register as click #3!
+        self.map_service.receiver.click_count = 0
+        
+        # C. Reload the original blank map into the browser!
+        # Because the HTML page is reloading, the JavaScript variables 
+        # (like the JS click count and active markers) will automatically reset too.
+        self.view.web_view.load(QUrl.fromLocalFile(self.base_html_path))
+        self.view.set_mode_base()
