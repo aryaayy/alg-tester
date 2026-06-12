@@ -7,7 +7,7 @@ from src.views.LoadingView import LoadingView
 
 from src.services.MapService import MapService
 from src.services.algs.SSSP import Dijkstra, BiDijkstra, AStar, BiAStar, BMSSP
-from src.services.RoutingService import RoutingThread
+from src.services.RoutingService import RoutingThread, BatchRoutingThread
 
 from src.models.HistoryModel import HistoryModel
 from src.models.PathModel import PathModel
@@ -19,6 +19,8 @@ import json
 import os
 from PySide6.QtCore import QUrl
 from branca.element import Element
+
+import csv
 
 class MapLoaderThread(QThread):
     service_ready = Signal(object) 
@@ -73,8 +75,8 @@ class MapController(QObject):
         
         self.base_html_path = self.map_service.generate_base_map()
         self.view = MapView(self.channel, self.base_html_path)
-        self.view.startButton.clicked.connect(self.start_routing)
-        self.view.resetButton.clicked.connect(self.reset_to_base_map)
+        self.view.startButton.clicked.connect(self.on_start_clicked)
+        self.view.resetButton.clicked.connect(self.on_reset_clicked)
 
         self.source_osmid = None
         self.dest_osmid = None
@@ -88,32 +90,60 @@ class MapController(QObject):
         print(f"Triggering routing algorithm from {source_osmid} to {dest_osmid}!")
         self.source_osmid = source_osmid
         self.dest_osmid = dest_osmid
-        # e.g., result = SqlBiAStar().find_shortest_path(source_osmid, dest_osmid)
+        
+        csv_filename = "D:/Arya/Skripsi/alg_tester/test/pendek.csv"
 
-    def start_routing(self):
-        if self.source_osmid == None or self.dest_osmid == None:
-            self.view.show_message(QMessageBox.Icon.Critical, "Gagal!", "Pilih simpul asal dan tujuan!")
-            return
+        if self.source_osmid != None and self.dest_osmid != None:        
+            # Open the file in append mode ('a')
+            with open(csv_filename, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                # Append the source and destination as a new row
+                writer.writerow(["pendek", source_osmid, dest_osmid])
+
+    def on_start_clicked(self):
+        mode = self.view.get_input_mode()
+    
+        if mode == "file":
+            file_path = self.view.get_batch_file_path()
+            if not file_path:
+                self.view.show_message(QMessageBox.Icon.Warning, "Gagal!", "Pilih file CSV terlebih dahulu!")
+                return
+            # Panggil BatchRoutingThread di sini...
+        elif mode == "map":
+            if self.source_osmid == None or self.dest_osmid == None:
+                self.view.show_message(QMessageBox.Icon.Warning, "Gagal!", "Pilih simpul asal dan tujuan!")
+                return
 
         active_algs = self.view.get_selected_algorithms()
         loop_count = self.view.get_loop_count()
 
         if not active_algs:
-            self.view.show_message(QMessageBox.Icon.Critical, "Gagal!", "Pilih paling tidak 1 algoritma!")
+            self.view.show_message(QMessageBox.Icon.Warning, "Gagal!", "Pilih paling tidak 1 algoritma!")
             return
 
         self.view.show_message(QMessageBox.Icon.Information, "Sedang Memproses", "Algoritma sedang memproses rute di latar belakang. Silakan tunggu...")
 
         # 3. Create and Start the Background Thread
-        self.routing_thread = RoutingThread(
-            self.source_osmid, 
-            self.dest_osmid, 
-            state.indoDbPath, 
-            active_algs,
-            loop_count
-        )
+        if mode == "file":
+            self.routing_thread = BatchRoutingThread(
+                file_path, 
+                state.indoDbPath, 
+                active_algs,
+                loop_count
+            )
+        elif mode == "map":
+            self.routing_thread = RoutingThread(
+                self.source_osmid, 
+                self.dest_osmid, 
+                state.indoDbPath, 
+                active_algs,
+                loop_count
+            )
         
+        self.view.set_mode_progress()
+
         # Connect the signal to receive the results when it finishes
+        self.routing_thread.progress_updated.connect(self.view.update_progress)
         self.routing_thread.routing_finished.connect(self.on_routing_finished)
         
         # START THE THREAD (This runs without freezing the UI!)
@@ -123,16 +153,17 @@ class MapController(QObject):
     def on_routing_finished(self, results):
         print("\n[Main Thread] Routing Complete! Results:")
         
-        text = "SUMMARY\n\n"
-        for alg_name, data in results.items():
-            print(f"--- {alg_name.upper()} ---")
-            print(f"Distance: {round(data['distance'], 2)} meters")
-            print(f"Metrics: {data['metrics']}\n")
-            text += f"""--- {alg_name.upper()} ---\nDistance: {round(data['distance'], 2)} meters\nMetrics: {data['metrics']}\n\n"""
+        # text = "SUMMARY\n\n"
+        # for alg_name, data in results.items():
+        #     print(f"--- {alg_name.upper()} ---")
+        #     print(f"Distance: {round(data['distance'], 2)} meters")
+        #     print(f"Metrics: {data['metrics']}\n")
+        #     text += f"""--- {alg_name.upper()} ---\nDistance: {round(data['distance'], 2)} meters\nMetrics: {data['metrics']}\n\n"""
             
         # You can now trigger your MapService to draw the winning path!
         # answer = self.view.show_question(None, "Sukses!", f"{text}Pencarian rute selesai! Simpan riwayat?")
-        answer = self.view.show_message(QMessageBox.Icon.Information, "Sukses!", f"{text}Pencarian rute selesai! Simpan riwayat?")
+        self.view.show_message(QMessageBox.Icon.Information, "Sukses!", f"Pencarian rute selesai!")
+        self.view.set_mode_base()
 
         # if(answer == QMessageBox.StandardButton.Yes):
             # for alg_name, data in results.items():
@@ -163,7 +194,7 @@ class MapController(QObject):
         self.view.web_view.load(QUrl.fromLocalFile(map_file_path))
         self.view.set_mode_animated()
 
-    def reset_to_base_map(self):
+    def on_reset_clicked(self):
         """Reloads the clean base map and resets all clicking variables."""
         print("Returning to base map...")
         

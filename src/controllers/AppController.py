@@ -1,11 +1,13 @@
 from src.views.MainWindow import MainWindow
 from src.views.LoadingView import LoadingView
+from src.views.components import ExportPopup
 from src.controllers.HomeController import HomeController
 from src.controllers.HelpController import HelpController
 from src.controllers.MapController import MapController
 from src.controllers.HistoryController import HistoryController
 from src.models.HistoryModel import HistoryModel
 import csv
+from src.services.ExportService import *
 
 class AppController:
     def __init__(self):
@@ -66,38 +68,46 @@ class AppController:
         self.mainWindow.btn_help.setChecked(active_target == "HelpView")
     
     def on_export(self):
-        """Triggered when the user clicks File -> Export or presses Ctrl+E"""
-        
-        # 1. Open a Save File Dialog
-        file_path = self.mainWindow.get_export_path()
-        
-        if not file_path:
-            return 
-
         try:
-            # 2. Call your Model!
-            history_model = HistoryModel()
-            history_list, _ = history_model.fetch_all()
-            
-            # Check if there is actually data to export
-            if not history_list:
-                self.mainWindow.show_export_failed()
-                return
+            file_path = ExportPopup.get_export_path(self.mainWindow)
+            result = to_csv_all(file_path)
 
-            # 3. Get the exact headers from the dictionary keys 
-            # (history_id, alg, source_osmid, etc.)
-            headers = list(history_list[0].keys())
-
-            # 4. Write to CSV using DictWriter
-            with open(file_path, mode='w', newline='', encoding='utf-8') as csv_file:
-                # DictWriter automatically maps your dictionaries to the correct columns!
-                writer = csv.DictWriter(csv_file, fieldnames=headers)
-                
-                writer.writeheader()         # Write the top row (column names)
-                writer.writerows(history_list) # Dump all the dictionaries in at once
-                
-            # 5. Show success message
-            self.mainWindow.show_export_success(len(history_list), file_path)
-            
+            if result["code"] == 200:
+                ExportPopup.show_export_success(self.mainWindow, result["msg"])
+            elif result["code"] == 477:
+                ExportPopup.show_export_failed(self.mainWindow, result["msg"])
         except Exception as e:
-            self.mainWindow.show_export_error(e)
+            ExportPopup.show_export_error(self.mainWindow, e)
+        # 1. Open a Save File Dialog
+        # file_path = self.mainWindow.get_export_path()
+        
+        # if not file_path:
+        #     return 
+
+        # try:
+        #     # 2. Call your Model!
+        #     history_model = HistoryModel()
+        #     history_list, _ = history_model.fetch_all()
+            
+        #     # Check if there is actually data to export
+        #     if not history_list:
+        #         self.mainWindow.show_export_failed()
+        #         return
+
+        #     # 3. Get the exact headers from the dictionary keys 
+        #     # (history_id, alg, source_osmid, etc.)
+        #     headers = list(history_list[0].keys())
+
+        #     # 4. Write to CSV using DictWriter
+        #     with open(file_path, mode='w', newline='', encoding='utf-8') as csv_file:
+        #         # DictWriter automatically maps your dictionaries to the correct columns!
+        #         writer = csv.DictWriter(csv_file, fieldnames=headers)
+                
+        #         writer.writeheader()         # Write the top row (column names)
+        #         writer.writerows(history_list) # Dump all the dictionaries in at once
+                
+        #     # 5. Show success message
+        #     self.mainWindow.show_export_success(len(history_list), file_path)
+            
+        # except Exception as e:
+        #     self.mainWindow.show_export_error(e)

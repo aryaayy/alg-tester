@@ -1,8 +1,10 @@
 # Inside your Controller
 from src.views.HistoryView import HistoryView, HistoryDetailDialog
+from src.views.components import ExportPopup
 from src.models.HistoryModel import HistoryModel
 from src.models.PathModel import PathModel
 from src.store.AppState import state
+from src.services.ExportService import *
 
 class HistoryController:
     def __init__(self, appController):
@@ -14,6 +16,7 @@ class HistoryController:
         self.view = HistoryView()
 
         self.view.detail_requested.connect(self.on_detail_requested)
+        self.view.export_requested.connect(self.on_export)
         self.view.load_route_requested.connect(self.on_history_load_clicked)
         self.view.mode_changed.connect(self.on_history_mode_changed)
 
@@ -78,3 +81,15 @@ class HistoryController:
         
         # 4. CRITICAL: Switch the screen so the user can see it!
         self.appController.route("MapView")
+    
+    def on_export(self, timestamp):
+        try:
+            file_path = ExportPopup.get_export_path(self.view)
+            result = to_csv_by_timestamp(file_path, timestamp)
+
+            if result["code"] == 200:
+                ExportPopup.show_export_success(self.view, result["msg"])
+            else:
+                ExportPopup.show_export_failed(self.view, result["msg"])
+        except Exception as e:
+            ExportPopup.show_export_error(self.view, e)

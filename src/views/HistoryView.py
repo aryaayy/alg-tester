@@ -66,6 +66,7 @@ class LoadSettingsDialog(QDialog):
 class HistoryView(QWidget):
     # We now have three signals!
     detail_requested = Signal(str)
+    export_requested = Signal(str)
     load_route_requested = Signal(dict)
     mode_changed = Signal(str) # Emits "grouped" or "all"
 
@@ -103,7 +104,8 @@ class HistoryView(QWidget):
     def populate_grouped(self, unique_dates):
         self.table.clear() # Wipes the table clean!
         
-        headers = ["Tanggal", "Source ID", "Dest ID", "Aksi"]
+        # headers = ["Tanggal", "Source ID", "Dest ID", "Aksi"]
+        headers = ["Tanggal", "Aksi", "Data"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -111,14 +113,19 @@ class HistoryView(QWidget):
 
         self.table.setRowCount(len(unique_dates))
         for row_index, data in enumerate(unique_dates):
-            self.table.setItem(row_index, 0, QTableWidgetItem(str(data[0])))
-            self.table.setItem(row_index, 1, QTableWidgetItem(str(data[1])))
-            self.table.setItem(row_index, 2, QTableWidgetItem(str(data[2])))
+            self.table.setItem(row_index, 0, QTableWidgetItem(str(data)))
+            # self.table.setItem(row_index, 1, QTableWidgetItem(str(data[1])))
+            # self.table.setItem(row_index, 2, QTableWidgetItem(str(data[2])))
             
             detail_btn = QPushButton("Detail")
             detail_btn.setStyleSheet("background-color: #17a2b8; color: white; border-radius: 4px; padding: 4px;")
-            detail_btn.clicked.connect(lambda checked=False, d=data[0]: self.detail_requested.emit(d))
-            self.table.setCellWidget(row_index, 3, detail_btn)
+            detail_btn.clicked.connect(lambda checked=False, d=data: self.detail_requested.emit(d))
+            self.table.setCellWidget(row_index, 1, detail_btn)
+            
+            export_btn = QPushButton("Export")
+            export_btn.setStyleSheet("background-color: #17a2b8; color: white; border-radius: 4px; padding: 4px;")
+            export_btn.clicked.connect(lambda checked=False, d=data: self.export_requested.emit(d))
+            self.table.setCellWidget(row_index, 2, export_btn)
 
     def populate_all(self, history_data):
         self.table.clear() # Wipes the table clean!
@@ -175,8 +182,8 @@ class HistoryDetailDialog(QDialog):
         layout = QVBoxLayout(self)
         
         self.table = QTableWidget()
-        # headers = ["Algoritma", "Source ID", "Dest ID", "Jarak (m)", "Waktu (s)", "Memori", "Simpul"]
-        headers = ["Algoritma", "Jarak (m)", "Waktu (s)", "Memori (bytes)", "Simpul", "Aksi"]
+        headers = ["Algoritma", "Source ID", "Dest ID", "Jarak (m)", "Waktu (s)", "Memori", "Simpul", "Aksi"]
+        # headers = ["Algoritma", "Jarak (m)", "Waktu (s)", "Memori (bytes)", "Simpul", "Aksi"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -186,17 +193,17 @@ class HistoryDetailDialog(QDialog):
         self.table.setRowCount(len(specific_data))
         for i, record in enumerate(specific_data):
             self.table.setItem(i, 0, QTableWidgetItem(record["alg"]))
-            # self.table.setItem(i, 1, QTableWidgetItem(str(record["source_osmid"])))
-            # self.table.setItem(i, 2, QTableWidgetItem(str(record["dest_osmid"])))
-            self.table.setItem(i, 1, QTableWidgetItem(str(round(record["distance"], 2))))
-            self.table.setItem(i, 2, QTableWidgetItem(str(round(record["exec_time"], 4))))
-            self.table.setItem(i, 3, QTableWidgetItem(str(record["exec_space"])))
-            self.table.setItem(i, 4, QTableWidgetItem(str(record["vis_nodes"])))
+            self.table.setItem(i, 1, QTableWidgetItem(str(record["source_osmid"])))
+            self.table.setItem(i, 2, QTableWidgetItem(str(record["dest_osmid"])))
+            self.table.setItem(i, 3, QTableWidgetItem(str(round(record["distance"], 2))))
+            self.table.setItem(i, 4, QTableWidgetItem(str(round(record["exec_time"], 4))))
+            self.table.setItem(i, 5, QTableWidgetItem(str(record["exec_space"])))
+            self.table.setItem(i, 6, QTableWidgetItem(str(record["vis_nodes"])))
 
             action_btn = QPushButton("Load")
             action_btn.setStyleSheet("background-color: #007bff; color: white; border-radius: 4px; padding: 4px;")
             action_btn.clicked.connect(lambda checked=False, r=record: self.on_load_clicked(r))
-            self.table.setCellWidget(i, 5, action_btn)
+            self.table.setCellWidget(i, 7, action_btn)
             
         layout.addWidget(self.table)
     

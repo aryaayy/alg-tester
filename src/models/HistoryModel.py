@@ -39,8 +39,10 @@ class HistoryModel:
         history_list = []
         unique_dates = []
         for row in rows:
-            if (row[8], row[2], row[3]) not in unique_dates:
-                unique_dates.append((row[8], row[2], row[3]))
+            if row[8] not in unique_dates:
+                unique_dates.append(row[8])
+            # if (row[8], row[2], row[3]) not in unique_dates:
+            #     unique_dates.append((row[8], row[2], row[3]))
 
             history_list.append({
                 "history_id": row[0],
@@ -55,3 +57,33 @@ class HistoryModel:
             })
             
         return history_list, unique_dates
+    
+    def fetch_by_timestamp(self, timestamp):
+        """Fetches all history records and returns them as a list of dictionaries.""" 
+        # Fetch all columns, ordering by newest first
+        query = """
+            SELECT history_id, alg, source_osmid, dest_osmid, distance, 
+                   exec_time, exec_space, vis_nodes, created_at 
+            FROM histories 
+            WHERE created_at=?
+            ORDER BY history_id DESC
+        """
+        self.c.execute(query, (timestamp,))
+        rows = self.c.fetchall()
+
+        # Map the raw SQLite tuples to clean Python dictionaries
+        history_list = []
+        for row in rows:
+            history_list.append({
+                "history_id": row[0],
+                "alg": row[1],
+                "source_osmid": row[2],
+                "dest_osmid": row[3],
+                "distance": row[4],
+                "exec_time": row[5],
+                "exec_space": row[6],
+                "vis_nodes": row[7],
+                "created_at": row[8]
+            })
+            
+        return history_list
