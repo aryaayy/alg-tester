@@ -10,13 +10,14 @@ class RoutingThread(QThread):
     routing_finished = Signal(dict)
     progress_updated = Signal(int, str) # 1. TAMBAHKAN SINYAL BARU DI SINI
 
-    def __init__(self, source_osmid, dest_osmid, db_path, active_algs, loop_count):
+    def __init__(self, source_osmid, dest_osmid, db_path, active_algs, loop_count, is_save_traversal):
         super().__init__()
         self.source_osmid = source_osmid
         self.dest_osmid = dest_osmid
         self.db_path = db_path
         self.active_algs = active_algs
         self.loop_count = loop_count
+        self.is_save_traversal = is_save_traversal
         
         self.alg_classes = {
             "dijkstra": Dijkstra,
@@ -37,50 +38,60 @@ class RoutingThread(QThread):
         total_steps = self.loop_count * len(self.active_algs) * 2
         current_step = 0
 
-        for i in range(self.loop_count):
-            for alg_name in self.active_algs:
-                if alg_name not in self.alg_classes:
-                    continue
+        try:
+            for i in range(self.loop_count):
+                for alg_name in self.active_algs:
+                    if alg_name not in self.alg_classes:
+                        continue
+                        
+                    # 3. UPDATE PROGRESS SETIAP KALI ALGORITMA AKAN BERJALAN
+                    percent = int((current_step / total_steps) * 100)
+                    pesan = f"Iterasi {i+1}/{self.loop_count} | Menjalankan {alg_name.upper()}..."
+                    self.progress_updated.emit(percent, pesan)
                     
-                # 3. UPDATE PROGRESS SETIAP KALI ALGORITMA AKAN BERJALAN
-                percent = int((current_step / total_steps) * 100)
-                pesan = f"Iterasi {i+1}/{self.loop_count} | Menjalankan {alg_name.upper()}..."
-                self.progress_updated.emit(percent, pesan)
-                
-                solver = self.alg_classes[alg_name]()
-                result = solver.find_shortest_path(self.source_osmid, self.dest_osmid, self.db_path)
-                
-                results[i][alg_name] = {
-                    "distance": result["distance"], 
-                    "traversal_path": result["visited"], 
-                    "final_path": result["final_path"], 
-                    "metrics": solver.metrics.to_dict(), 
-                    "created_at": created_at
-                }
+                    solver = self.alg_classes[alg_name]()
+                    result = solver.find_shortest_path(self.source_osmid, self.dest_osmid, self.db_path)
+                    
+                    results[i][alg_name] = {
+                        "distance": result["distance"], 
+                        "traversal_path": result["visited"], 
+                        "final_path": result["final_path"], 
+                        "metrics": solver.metrics.to_dict(), 
+                        "created_at": created_at
+                    }
 
-                current_step += 1
+                    current_step += 1
 
-                percent = int((current_step / total_steps) * 100)
-                pesan = f"Iterasi {i+1}/{self.loop_count} | Menyimpan hasil routing {alg_name.upper()}..."
-                self.progress_updated.emit(percent, pesan)
+                    percent = int((current_step / total_steps) * 100)
+                    pesan = f"Iterasi {i+1}/{self.loop_count} | Menyimpan hasil routing {alg_name.upper()}..."
+                    self.progress_updated.emit(percent, pesan)
 
-                # Simpan ke DB (History & Path)
-                history = HistoryModel()
-                history.insert(
-                    alg_name.upper(), self.source_osmid, self.dest_osmid, 
-                    results[i][alg_name]['distance'], results[i][alg_name]['metrics']['exec_time'], 
-                    results[i][alg_name]['metrics']['exec_space'], results[i][alg_name]['metrics']['vis_nodes'], 
-                    results[i][alg_name]["created_at"]
-                )
-                history_id = history.fetch_latest_id(created_at, alg_name.upper())
+                    # Simpan ke DB (History & Path)
+                    history = HistoryModel()
+                    history.insert(
+                        alg_name.upper(), self.source_osmid, self.dest_osmid, 
+                        results[i][alg_name]['distance'], results[i][alg_name]['metrics']['exec_time'], 
+                        results[i][alg_name]['metrics']['exec_space'], results[i][alg_name]['metrics']['vis_nodes'], 
+                        results[i][alg_name]["created_at"]
+                    )
 
-                paths = PathModel()
-                traversal_coords = paths.to_coords(results[i][alg_name]['traversal_path'])
-                final_path_coords = paths.to_coords(results[i][alg_name]['final_path'])
-                paths.insert_traversal(history_id, traversal_coords)
-                paths.insert_final_path(history_id, final_path_coords)
-                
-                current_step += 1
+                    if self.is_save_traversal:
+                        history_id = history.fetch_latest_id(created_at, alg_name.upper())
+
+                        paths = PathModel()
+                        traversal_coords = paths.to_coords(results[i][alg_name]['traversal_path'])
+                        final_path_coords = paths.to_coords(results[i][alg_name]['final_path'])
+                        paths.insert_traversal(history_id, traversal_coords)
+                        paths.insert_final_path(history_id, final_path_coords)
+                    
+                    current_step += 1
+        except Exception as e:
+            percent = int((current_step / total_steps) * 100)
+            pesan = f"Gagal! {str(e)}"
+            self.progress_updated.emit(percent, pesan)
+            self.routing_finished.emit({"msg": e})
+            print(e)
+            return
 
         percent = int((current_step / total_steps) * 100)
         pesan = f"Selesai"
@@ -119,12 +130,13 @@ class BatchRoutingThread(QThread):
     progress_updated = Signal(int, str) # Sinyal untuk ProgressBar (persentase, pesan)
     routing_finished = Signal(str)        # Mengirimkan teks ringkasan (summary) ke UI
 
-    def __init__(self, csv_file_path, db_path, active_algs, loop_count):
+    def __init__(self, csv_file_path, db_path, active_algs, loop_count, is_save_traversal):
         super().__init__()
         self.csv_file_path = csv_file_path
         self.db_path = db_path
         self.active_algs = active_algs
         self.loop_count = loop_count
+        self.is_save_traversal = is_save_traversal
 
         self.alg_classes = {
             "dijkstra": Dijkstra,
@@ -156,56 +168,66 @@ class BatchRoutingThread(QThread):
         # Variabel untuk summary di akhir
         total_success = 0
         
-        # 2. EKSEKUSI SKENARIO
-        for idx, scenario in enumerate(scenarios):
-            kategori = scenario.get('kategori', f"Row_{idx+1}")
-            source = int(scenario.get('source_osmid', 0))
-            dest = int(scenario.get('dest_osmid', 0))
+        try:
+            # 2. EKSEKUSI SKENARIO
+            for idx, scenario in enumerate(scenarios):
+                kategori = scenario.get('kategori', f"Row_{idx+1}")
+                source = int(scenario.get('source_osmid', 0))
+                dest = int(scenario.get('dest_osmid', 0))
 
-            for alg_name in self.active_algs:
+                for alg_name in self.active_algs:
 
-                for i in range(self.loop_count):
-                    percent = int((current_task / total_tasks) * 100)
-                    msg = f"Menjalankan {alg_name.upper()} | {kategori.upper()} | Skenario {idx+1}/{len(scenarios)} | Iterasi {i+1}/{self.loop_count}"
-                    self.progress_updated.emit(percent, msg)
+                    for i in range(self.loop_count):
+                        percent = int((current_task / total_tasks) * 100)
+                        msg = f"Menjalankan {alg_name.upper()} | {kategori.upper()} | Skenario {idx+1}/{len(scenarios)} | Iterasi {i+1}/{self.loop_count}"
+                        self.progress_updated.emit(percent, msg)
 
-                    solver: PathFinder = self.alg_classes[alg_name]()
+                        solver: PathFinder = self.alg_classes[alg_name]()
 
-                    result = solver.find_shortest_path(source, dest, self.db_path)
+                        result = solver.find_shortest_path(source, dest, self.db_path)
 
-                    current_task += 1
+                        current_task += 1
+                        
+                        percent = int((current_task / total_tasks) * 100)
+                        msg = f"Menyimpan hasil routing {alg_name.upper()} | {kategori.upper()} | Skenario {idx+1}/{len(scenarios)} | Iterasi {i+1}/{self.loop_count}"
+                        self.progress_updated.emit(percent, msg)
+
+                        summary = {
+                            "distance": result["distance"], 
+                            "traversal_path": result["visited"], 
+                            "final_path": result["final_path"], 
+                            "metrics": solver.metrics.to_dict(), 
+                            "created_at": db_created_at
+                        }
+                        
+                        # Simpan ke DB (History & Path)
+                        history = HistoryModel()
+                        history.insert(
+                            alg_name.upper(), source, dest, 
+                            summary['distance'], summary['metrics']['exec_time'], 
+                            summary['metrics']['exec_space'], summary['metrics']['vis_nodes'], 
+                            summary["created_at"]
+                        )
+                        
+                        if self.is_save_traversal:
+                            history_id = history.fetch_latest_id(db_created_at, alg_name.upper())
+
+                            paths = PathModel()
+                            traversal_coords = paths.to_coords(summary["traversal_path"])
+                            final_path_coords = paths.to_coords(summary["final_path"])
+                            paths.insert_traversal(history_id, traversal_coords)
+                            paths.insert_final_path(history_id, final_path_coords)
+                        
+                        current_task += 1
                     
-                    percent = int((current_task / total_tasks) * 100)
-                    msg = f"Menyimpan hasil routing {alg_name.upper()} | {kategori.upper()} | Skenario {idx+1}/{len(scenarios)} | Iterasi {i+1}/{self.loop_count}"
-                    self.progress_updated.emit(percent, msg)
-
-                    summary = {
-                        "distance": result["distance"], 
-                        "traversal_path": result["visited"], 
-                        "final_path": result["final_path"], 
-                        "metrics": solver.metrics.to_dict(), 
-                        "created_at": db_created_at
-                    }
-                    
-                    # Simpan ke DB (History & Path)
-                    history = HistoryModel()
-                    history.insert(
-                        alg_name.upper(), source, dest, 
-                        summary['distance'], summary['metrics']['exec_time'], 
-                        summary['metrics']['exec_space'], summary['metrics']['vis_nodes'], 
-                        summary["created_at"]
-                    )
-                    history_id = history.fetch_latest_id(db_created_at, alg_name.upper())
-
-                    paths = PathModel()
-                    traversal_coords = paths.to_coords(summary["traversal_path"])
-                    final_path_coords = paths.to_coords(summary["final_path"])
-                    paths.insert_traversal(history_id, traversal_coords)
-                    paths.insert_final_path(history_id, final_path_coords)
-                    
-                    current_task += 1
-                
-                total_success += 1
+                    total_success += 1
+        except Exception as e:
+            percent = int((current_task / total_tasks) * 100)
+            pesan = f"Gagal! {str(e)}"
+            self.progress_updated.emit(percent, pesan)
+            self.routing_finished.emit(str(e))
+            print(e)
+            return
 
         percent = int((current_task / total_tasks) * 100)
         msg = f"Selesai"

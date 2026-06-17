@@ -77,9 +77,58 @@ class MapService:
         </style>
         """
 
+        # --- UPDATE MULAI DARI SINI ---
         click_js = """
         <script type="text/javascript" src="qrc:///qtwebchannel/qwebchannel.js"></script>
         <script>
+            // === FUNGSI BATCH PROCESSING (Dapat dipanggil dari PySide6) ===
+            window.isMapLocked = false;
+            window.batchMarkersLayer = null;
+            window.leafletMapObj = null;
+
+            window.lockMapInteractions = function(lock) {
+                window.isMapLocked = lock;
+                console.log(lock ? "Peta dikunci. Mode Batch aktif." : "Peta dibuka. Mode Manual aktif.");
+            };
+
+            window.renderBatchPinpoints = function(pointsList) {
+                if (!window.batchMarkersLayer || !window.leafletMapObj) return;
+                
+                window.batchMarkersLayer.clearLayers();
+                if (pointsList.length === 0) return;
+
+                let bounds = [];
+                pointsList.forEach(function(point) {
+                    
+                    // --- LOGIKA WARNA BARU ---
+                    // Hijau (#28a745) untuk Source, Merah (#dc3545) untuk Dest
+                    let markerColor = (point.type === "source") ? "#28a745" : "#dc3545";
+                    
+                    let marker = L.circleMarker([point.lat, point.lon], {
+                        radius: 6,                 // Sedikit diperbesar agar lebih jelas
+                        fillColor: markerColor,    // Menggunakan warna dinamis
+                        color: "#ffffff",          // Outline putih agar menonjol
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.9
+                    }).bindPopup("<b>OSMID:</b> " + point.id + "<br><b>Tipe:</b> " + point.type.toUpperCase());
+                    
+                    window.batchMarkersLayer.addLayer(marker);
+                    bounds.push([point.lat, point.lon]);
+                });
+
+                if (bounds.length > 0) {
+                    window.leafletMapObj.fitBounds(bounds, { padding: [20, 20] });
+                }
+            };
+
+            window.clearBatchPinpoints = function() {
+                if (window.batchMarkersLayer) {
+                    window.batchMarkersLayer.clearLayers();
+                }
+            };
+            // ==============================================================
+
             setTimeout(function() {
                 var leafletMap = null;
                 for (var key in window) {
@@ -90,6 +139,10 @@ class MapService:
                 }
 
                 if (leafletMap) {
+                    // Simpan referensi peta secara global untuk fungsi Batch
+                    window.leafletMapObj = leafletMap;
+                    window.batchMarkersLayer = L.layerGroup().addTo(leafletMap);
+
                     // 1. Define custom colored icons
                     var greenIcon = new L.Icon({
                         iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
@@ -113,6 +166,13 @@ class MapService:
                         var pyReceiver = channel.objects.pyReceiver;
                         
                         leafletMap.on('click', function(e) {
+                            // --- CEK KUNCI PETA SEBELUM MEMPROSES KLIK ---
+                            if (window.isMapLocked) {
+                                alert("Pemilihan titik manual dinonaktifkan selama Mode Batch Processing aktif.");
+                                return; 
+                            }
+                            // ---------------------------------------------
+
                             var lat = e.latlng.lat;
                             var lon = e.latlng.lng;
                             
@@ -142,6 +202,8 @@ class MapService:
             }, 1000);
         </script>
         """
+        # --- UPDATE BERAKHIR DI SINI ---
+
         m.get_root().header.add_child(folium.Element(cursor_style))
         m.get_root().html.add_child(folium.Element(click_js))
         

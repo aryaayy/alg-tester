@@ -435,6 +435,10 @@ class BiDijkstra(PathFinder):
             "final_path": final_path
         }
 
+import heapq
+import math
+import sqlite3
+
 class BMSSPDS:
     def __init__(self, M, B):
         self.M = max(1, M)
@@ -444,18 +448,73 @@ class BMSSPDS:
     def insert(self, item):
         heapq.heappush(self.heap, item)
 
-    def pull(self):
+    def pull(self, dist_hat):
         if not self.heap:
             return self.B, set()
         
         Si = set()
         while self.heap and len(Si) < self.M:
             dist, node = heapq.heappop(self.heap)
+            
+            # LAZY DELETION: Abaikan jarak usang
+            if dist > dist_hat.get(node, float('inf')):
+                continue
+                
             if node not in Si:
                 Si.add(node)
                 
-        while self.heap and self.heap[0][1] in Si:
-            heapq.heappop(self.heap)
+        while self.heap:
+            top_dist, top_node = self.heap[0]
+            if top_dist > dist_hat.get(top_node, float('inf')) or top_node in Si:
+                heapq.heappop(self.heap)
+            else:
+                break
+
+        Bi = self.heap[0][0] if self.heap else self.B
+        return Bi, Si
+
+    def batch_prepend(self, item_set):
+        for item in item_set:
+            self.insert(item)
+    
+    def is_empty(self):
+        return len(self.heap) == 0
+
+import heapq
+import math
+import sqlite3
+
+class BMSSPDS:
+    def __init__(self, M, B):
+        self.M = max(1, M)
+        self.B = B
+        self.heap = []
+    
+    def insert(self, item):
+        heapq.heappush(self.heap, item)
+
+    def pull(self, dist_hat):
+        if not self.heap:
+            return self.B, set()
+        
+        Si = set()
+        while self.heap and len(Si) < self.M:
+            dist, node = heapq.heappop(self.heap)
+            
+            # LAZY DELETION: Abaikan jarak yang sudah usang di memori
+            if dist > dist_hat.get(node, float('inf')):
+                continue
+                
+            if node not in Si:
+                Si.add(node)
+                
+        # Bersihkan sisa elemen usang di pucuk antrean agar batas Bi akurat
+        while self.heap:
+            top_dist, top_node = self.heap[0]
+            if top_dist > dist_hat.get(top_node, float('inf')) or top_node in Si:
+                heapq.heappop(self.heap)
+            else:
+                break
 
         Bi = self.heap[0][0] if self.heap else self.B
         return Bi, Si
@@ -472,9 +531,9 @@ class BMSSP(PathFinder):
     def __init__(self):
         super().__init__()
         self.dist_hat = {}
-        self.c = None  # We will store the DB cursor here for recursive access
+        self.c = None  
+        self.expanded = set() # HIMPUNAN EMAS: Melacak simpul yang SUDAH selesai
         self.visited = []
-        self.came_from = {}
 
     def _find_pivots(self, B, S, k):
         W = set(S)
@@ -483,10 +542,10 @@ class BMSSP(PathFinder):
         for i in range(1, k + 1):
             W_curr = set()
             for u in W_prev:
-                self.visited.append(u)
+                if u in self.expanded: continue # Lewati jika sudah final
                 self.metrics.vis_nodes += 1
+                print(u)
                 
-                # SQLite Successors
                 self.c.execute("""
                     SELECT target, MIN(length) 
                     FROM edges 
@@ -498,14 +557,15 @@ class BMSSP(PathFinder):
                     if w_uv is None: continue
                     w_uv = float(w_uv)
                     
-                    dist_u = self.dist_hat.get(u, float('inf'))
-                    dist_v = self.dist_hat.get(v, float('inf'))
+                    new_dist = self.dist_hat.get(u, float('inf')) + w_uv
+                    curr_dist = self.dist_hat.get(v, float('inf'))
                     
-                    if dist_u + w_uv <= dist_v:
-                        self.dist_hat[v] = dist_u + w_uv
-                        if dist_u + w_uv < B:
+                    if v in self.expanded: continue
+                    
+                    if new_dist < curr_dist:
+                        self.dist_hat[v] = new_dist
+                        if new_dist < B:
                             W_curr.add(v)
-                            self.came_from[v] = u
             
             W.update(W_curr)
             W_prev = W_curr
@@ -520,22 +580,33 @@ class BMSSP(PathFinder):
         if not S:
             return B, set()
             
-        x = list(S)[0]
         U0 = set()
         H = []
-        heapq.heappush(H, (self.dist_hat.get(x, float('inf')), x))
         
-        while H and len(U0) < k + 1:
+        # Masukkan SELURUH simpul batch ke antrean
+        for x in S:
+            heapq.heappush(H, (self.dist_hat.get(x, float('inf')), x))
+            
+        while H and len(U0) < k:
             d_u, u = heapq.heappop(H)
             
             if d_u > self.dist_hat.get(u, float('inf')):
                 continue
+            
+            # Jika sudah pernah diekspansi sebelumnya, buang! (Mencegah Infinite Loop)
+            if u in self.expanded:
+                continue
+                
+            # Jika melebihi batas, kembalikan ke heap untuk patokan B_prime, lalu hentikan loop
+            if d_u >= B:
+                heapq.heappush(H, (d_u, u))
+                break
                 
             U0.add(u)
-            self.visited.append(u)
+            self.expanded.add(u) # TANDAI SEBAGAI SELESAI
             self.metrics.vis_nodes += 1
+            print(u)
             
-            # SQLite Successors
             self.c.execute("""
                 SELECT target, MIN(length) 
                 FROM edges 
@@ -547,18 +618,26 @@ class BMSSP(PathFinder):
                 if w_uv is None: continue
                 w_uv = float(w_uv)
                 
-                new_dist = self.dist_hat.get(u, float('inf')) + w_uv
-                if new_dist <= self.dist_hat.get(v, float('inf')) and new_dist < B:
+                new_dist = d_u + w_uv
+                curr_dist = self.dist_hat.get(v, float('inf'))
+                
+                if v in self.expanded: continue # Jangan proses simpul yang sudah mati
+                
+                # Relaksasi KETAT di level Anak
+                if new_dist < curr_dist:
                     self.dist_hat[v] = new_dist
                     heapq.heappush(H, (new_dist, v))
-                    self.came_from[v] = u
                     
-        if len(U0) <= k:
-            return B, U0
-        else:
-            B_prime = max([self.dist_hat.get(v, float('inf')) for v in U0]) if U0 else B
-            U_return = {v for v in U0 if self.dist_hat.get(v, float('inf')) < B_prime}
-            return B_prime, U_return
+        # Pembersihan sisa Heap untuk menentukan B_prime yang akurat
+        while H:
+            if H[0][0] > self.dist_hat.get(H[0][1], float('inf')) or H[0][1] in self.expanded:
+                heapq.heappop(H)
+            else:
+                break
+                
+        B_prime = H[0][0] if H else B
+        B_prime = min(B_prime, B)
+        return B_prime, U0
 
     def _bmssp_recursive(self, l, B, S, k, t):
         if l == 0:
@@ -570,16 +649,16 @@ class BMSSP(PathFinder):
         D = BMSSPDS(M, B)
         
         for x in P:
-            D.insert((self.dist_hat.get(x, float('inf')), x))
+            if x not in self.expanded:
+                D.insert((self.dist_hat.get(x, float('inf')), x))
             
         current_B_prime = min([self.dist_hat.get(x, float('inf')) for x in P]) if P else B
         U = set()
         
         max_u_size = k * (2 ** (l * t))
-        prev_u_size = len(U)
         
         while len(U) < max_u_size and not D.is_empty():
-            Bi, Si = D.pull()
+            Bi, Si = D.pull(self.dist_hat)
             
             if self.best_distance_to_dest != float('inf') and Bi >= self.best_distance_to_dest: 
                 break
@@ -590,10 +669,7 @@ class BMSSP(PathFinder):
             
             K_set = set()
             for u in Ui:
-                self.visited.append(u)
-                self.metrics.vis_nodes += 1
-                
-                # SQLite Successors
+                # TIDAK ADA penambahan vis_nodes di sini, karena sudah dihitung di _base_case
                 self.c.execute("""
                     SELECT target, MIN(length) 
                     FROM edges 
@@ -606,31 +682,33 @@ class BMSSP(PathFinder):
                     w_uv = float(w_uv)
                     
                     new_dist = self.dist_hat.get(u, float('inf')) + w_uv
+                    curr_dist = self.dist_hat.get(v, float('inf'))
 
-                    # --- THE PRUNING CONDITION ---
                     if self.best_distance_to_dest != float('inf') and new_dist >= self.best_distance_to_dest:
-                        continue # Skip this branch, it's already too long!
+                        continue 
 
-                    if new_dist <= self.dist_hat.get(v, float('inf')):
-                        self.dist_hat[v] = new_dist
+                    if v in self.expanded: continue # Mencegah Infinite Loop dari tetangga
+                    
+                    # LOGIKA EMAS INDUK: Pakai <= agar Induk bisa merekonstruksi rute dari Anak!
+                    if new_dist <= curr_dist:
+                        if new_dist < curr_dist:
+                            self.dist_hat[v] = new_dist # Update jika benar-benar lebih kecil
 
-                        # --- UPDATE THE GLOBAL BOUND IF WE HIT DESTINATION ---
                         if v == self.target_node:
                             self.best_distance_to_dest = new_dist
                         
                         if Bi <= new_dist < B:
                             D.insert((new_dist, v))
-                        elif Bi_prime <= new_dist < Bi:
+                        elif new_dist < Bi:
                             K_set.add((new_dist, v))
-
-                        self.came_from[v] = u
                             
-            batch_items = K_set.union({(self.dist_hat.get(x, float('inf')), x) for x in Si if Bi_prime <= self.dist_hat.get(x, float('inf')) < Bi})
+            # Cegah Infinite Loop Tunggal: Jangan masukkan kembali jika sudah di expanded!
+            batch_items = K_set.union({
+                (self.dist_hat.get(x, float('inf')), x) 
+                for x in Si 
+                if Bi_prime <= self.dist_hat.get(x, float('inf')) < Bi and x not in self.expanded
+            })
             D.batch_prepend(batch_items)
-
-            if len(U) == prev_u_size and not batch_items:
-                break
-            prev_u_size = len(U)
             
         final_B_prime = min(current_B_prime, B)
         U.update({x for x in W if self.dist_hat.get(x, float('inf')) < final_B_prime})
@@ -643,20 +721,17 @@ class BMSSP(PathFinder):
 
         def run_alg():
             self.metrics.vis_nodes = 0
-            
             self.dist_hat = {} 
             self.dist_hat[S] = 0
+            self.expanded = set() # Reset setiap kali rute baru
 
-            # --- NEW: INITIALIZE THE EARLY STOPPING VARIABLES HERE ---
             self.target_node = D 
-            self.best_distance_to_dest = float('inf') # Starts at infinity!
+            self.best_distance_to_dest = float('inf')
             
-            # Fetch the total number of nodes in the graph to calculate 'k' and 't' bounds
             self.c.execute("SELECT COUNT(*) FROM nodes")
             V = self.c.fetchone()[0]
             
             log_n = math.log2(V) if V > 1 else 1
-            
             k = max(1, int(math.floor(log_n ** (1/3))))
             t = max(1, int(math.floor(log_n ** (2/3))))
             l = max(1, int(math.ceil(log_n / t))) if t > 0 else 1
@@ -670,27 +745,282 @@ class BMSSP(PathFinder):
             result = run_alg()
 
         conn.close()
-        final_path = []
         
-        # Check if we actually found a way to the destination
-        if D in self.came_from or D == S:
-            current = D
-            # Work backwards from the destination to the start
-            while current != S:
-                final_path.append(current)
-                current = self.came_from[current]
-            
-            # Don't forget to add the start node!
-            final_path.append(S)
-            
-            # Reverse it so it goes Source -> Destination
-            final_path.reverse() 
-
         return {
             "distance": result,
-            "visited": list(dict.fromkeys(self.visited)), 
-            "final_path": final_path
+            "visited": list(self.expanded), # Gunakan expanded sebagai bukti simpul yang dikunjungi
+            "final_path": [] 
         }
+
+# class BMSSPDS:
+#     def __init__(self, M, B):
+#         self.M = max(1, M)
+#         self.B = B
+#         self.heap = []
+    
+#     def insert(self, item):
+#         heapq.heappush(self.heap, item)
+
+#     def pull(self, dist_hat):
+#         if not self.heap:
+#             return self.B, set()
+        
+#         Si = set()
+#         while self.heap and len(Si) < self.M:
+#             dist, node = heapq.heappop(self.heap)
+            
+#             # CEK LAZY DELETION: Abaikan jika ini adalah riwayat jarak yang sudah usang!
+#             if dist > dist_hat.get(node, float('inf')):
+#                 continue
+                
+#             if node not in Si:
+#                 Si.add(node)
+                
+#         # Bersihkan sisa elemen usang di pucuk antrean agar batas Bi akurat!
+#         while self.heap:
+#             top_dist, top_node = self.heap[0]
+#             if top_dist > dist_hat.get(top_node, float('inf')) or top_node in Si:
+#                 heapq.heappop(self.heap)
+#             else:
+#                 break
+
+#         Bi = self.heap[0][0] if self.heap else self.B
+#         return Bi, Si
+
+#     def batch_prepend(self, item_set):
+#         for item in item_set:
+#             self.insert(item)
+    
+#     def is_empty(self):
+#         return len(self.heap) == 0
+
+
+# class BMSSP(PathFinder):
+#     def __init__(self):
+#         super().__init__()
+#         self.dist_hat = {}
+#         self.c = None  # We will store the DB cursor here for recursive access
+#         self.visited = []
+#         self.came_from = {}
+
+#     def _find_pivots(self, B, S, k):
+#         W = set(S)
+#         W_prev = set(S)
+        
+#         for i in range(1, k + 1):
+#             W_curr = set()
+#             for u in W_prev:
+#                 # self.visited.append(u)
+#                 self.metrics.vis_nodes += 1
+#                 # print(u)
+                
+#                 # SQLite Successors
+#                 self.c.execute("""
+#                     SELECT target, MIN(length) 
+#                     FROM edges 
+#                     WHERE source = ? 
+#                     GROUP BY target
+#                 """, (u,))
+                
+#                 for v, w_uv in self.c.fetchall():
+#                     if w_uv is None: continue
+#                     w_uv = float(w_uv)
+                    
+#                     dist_u = self.dist_hat.get(u, float('inf'))
+#                     dist_v = self.dist_hat.get(v, float('inf'))
+                    
+#                     if dist_u + w_uv <= dist_v:
+#                         self.dist_hat[v] = dist_u + w_uv
+#                         if dist_u + w_uv < B:
+#                             W_curr.add(v)
+#                             # self.came_from[v] = u
+            
+#             W.update(W_curr)
+#             W_prev = W_curr
+            
+#             if len(W) > k * len(S):
+#                 return set(S), W
+                
+#         P = set(S) 
+#         return P, W
+
+#     def _base_case(self, B, S, k):
+#         if not S:
+#             return B, set()
+            
+#         # x = list(S)[0]
+#         U0 = set()
+#         H = []
+#         for x in S:
+#             heapq.heappush(H, (self.dist_hat.get(x, float('inf')), x))
+        
+#         while H and len(U0) < k + 1:
+#             d_u, u = heapq.heappop(H)
+            
+#             if d_u > self.dist_hat.get(u, float('inf')):
+#                 continue
+                
+#             U0.add(u)
+#             # self.visited.append(u)
+#             self.metrics.vis_nodes += 1
+            
+#             self.c.execute("""
+#                 SELECT target, MIN(length) 
+#                 FROM edges 
+#                 WHERE source = ? 
+#                 GROUP BY target
+#             """, (u,))
+            
+#             for v, w_uv in self.c.fetchall():
+#                 if w_uv is None: continue
+#                 w_uv = float(w_uv)
+                
+#                 new_dist = self.dist_hat.get(u, float('inf')) + w_uv
+                
+#                 if new_dist < self.dist_hat.get(v, float('inf')) and new_dist < B:
+#                     self.dist_hat[v] = new_dist
+#                     heapq.heappush(H, (new_dist, v))
+#                     # self.came_from[v] = u
+                    
+#         if len(U0) <= k:
+#             return B, U0
+#         else:
+#             B_prime = max([self.dist_hat.get(v, float('inf')) for v in U0]) if U0 else B
+#             U_return = {v for v in U0 if self.dist_hat.get(v, float('inf')) < B_prime}
+#             return B_prime, U_return
+
+#     def _bmssp_recursive(self, l, B, S, k, t):
+#         if l == 0:
+#             return self._base_case(B, S, k)
+            
+#         P, W = self._find_pivots(B, S, k)
+        
+#         M = max(1, int(2 ** ((l - 1) * t)))
+#         D = BMSSPDS(M, B)
+        
+#         for x in P:
+#             D.insert((self.dist_hat.get(x, float('inf')), x))
+            
+#         current_B_prime = min([self.dist_hat.get(x, float('inf')) for x in P]) if P else B
+#         U = set()
+        
+#         max_u_size = k * (2 ** (l * t))
+#         prev_u_size = len(U)
+        
+#         while len(U) < max_u_size and not D.is_empty():
+#             Bi, Si = D.pull(self.dist_hat)
+            
+#             if self.best_distance_to_dest != float('inf') and Bi >= self.best_distance_to_dest: 
+#                 break
+
+#             Bi_prime, Ui = self._bmssp_recursive(l - 1, Bi, Si, k, t)
+#             current_B_prime = Bi_prime  
+#             U.update(Ui)
+            
+#             K_set = set()
+#             for u in Ui:
+#                 # self.visited.append(u)
+#                 self.metrics.vis_nodes += 1
+#                 # print(u)
+                
+#                 # SQLite Successors
+#                 self.c.execute("""
+#                     SELECT target, MIN(length) 
+#                     FROM edges 
+#                     WHERE source = ? 
+#                     GROUP BY target
+#                 """, (u,))
+                
+#                 for v, w_uv in self.c.fetchall():
+#                     if w_uv is None: continue
+#                     w_uv = float(w_uv)
+                    
+#                     new_dist = self.dist_hat.get(u, float('inf')) + w_uv
+
+#                     # --- THE PRUNING CONDITION ---
+#                     if self.best_distance_to_dest != float('inf') and new_dist >= self.best_distance_to_dest:
+#                         continue # Skip this branch, it's already too long!
+
+#                     if new_dist < self.dist_hat.get(v, float('inf')):
+#                         self.dist_hat[v] = new_dist
+
+#                         # --- UPDATE THE GLOBAL BOUND IF WE HIT DESTINATION ---
+#                         if v == self.target_node:
+#                             self.best_distance_to_dest = new_dist
+                        
+#                         if Bi <= new_dist < B:
+#                             D.insert((new_dist, v))
+#                         elif Bi_prime <= new_dist < Bi:
+#                             K_set.add((new_dist, v))
+
+#                         # self.came_from[v] = u
+                            
+#             batch_items = K_set.union({(self.dist_hat.get(x, float('inf')), x) for x in Si if Bi_prime <= self.dist_hat.get(x, float('inf')) < Bi})
+#             D.batch_prepend(batch_items)
+
+#             # if len(U) == prev_u_size and not batch_items:
+#             #     break
+#             prev_u_size = len(U)
+            
+#         final_B_prime = min(current_B_prime, B)
+#         U.update({x for x in W if self.dist_hat.get(x, float('inf')) < final_B_prime})
+        
+#         return final_B_prime, U
+
+#     def find_shortest_path(self, S, D, db_path="sumatra.db"):
+#         conn = sqlite3.connect(db_path)
+#         self.c = conn.cursor()
+
+#         def run_alg():
+#             self.metrics.vis_nodes = 0
+            
+#             self.dist_hat = {} 
+#             self.dist_hat[S] = 0
+
+#             # --- NEW: INITIALIZE THE EARLY STOPPING VARIABLES HERE ---
+#             self.target_node = D 
+#             self.best_distance_to_dest = float('inf') # Starts at infinity!
+            
+#             # Fetch the total number of nodes in the graph to calculate 'k' and 't' bounds
+#             self.c.execute("SELECT COUNT(*) FROM nodes")
+#             V = self.c.fetchone()[0]
+            
+#             log_n = math.log2(V) if V > 1 else 1
+            
+#             k = max(1, int(math.floor(log_n ** (1/3))))
+#             t = max(1, int(math.floor(log_n ** (2/3))))
+#             l = max(1, int(math.ceil(log_n / t))) if t > 0 else 1
+            
+#             self._bmssp_recursive(l, float('inf'), {S}, k, t)
+            
+#             result = self.dist_hat.get(D, float('inf'))
+#             return result if result != float('inf') else float('inf')
+        
+#         with self.metrics:
+#             result = run_alg()
+
+#         conn.close()
+#         final_path = []
+        
+#         # Check if we actually found a way to the destination
+#         if D in self.came_from or D == S:
+#             current = D
+#             # Work backwards from the destination to the start
+#             while current != S:
+#                 final_path.append(current)
+#                 current = self.came_from[current]
+            
+#             # Don't forget to add the start node!
+#             final_path.append(S)
+            
+#             # Reverse it so it goes Source -> Destination
+#             final_path.reverse() 
+
+#         return {
+#             "distance": result,
+#             "visited": list(dict.fromkeys(self.visited)), 
+#             "final_path": final_path
+#         }
     
 class Dijkstra(PathFinder):
     # Removed G from parameters, added db_path for flexibility

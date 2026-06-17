@@ -11,6 +11,7 @@ from src.services.RoutingService import RoutingThread, BatchRoutingThread
 
 from src.models.HistoryModel import HistoryModel
 from src.models.PathModel import PathModel
+from src.models.IndonesiaModel import IndonesiaModel
 
 from src.store.AppState import state
 
@@ -77,6 +78,8 @@ class MapController(QObject):
         self.view = MapView(self.channel, self.base_html_path)
         self.view.startButton.clicked.connect(self.on_start_clicked)
         self.view.resetButton.clicked.connect(self.on_reset_clicked)
+        self.view.radioMap.toggled.connect(self._toggle_mode_ui)
+        self.view.btnSelectFile.clicked.connect(self._open_file_dialog)
 
         self.source_osmid = None
         self.dest_osmid = None
@@ -91,14 +94,14 @@ class MapController(QObject):
         self.source_osmid = source_osmid
         self.dest_osmid = dest_osmid
         
-        csv_filename = "D:/Arya/Skripsi/alg_tester/test/pendek.csv"
+        # csv_filename = "D:/Arya/Skripsi/alg_tester/test/jauhcoba.csv"
 
-        if self.source_osmid != None and self.dest_osmid != None:        
-            # Open the file in append mode ('a')
-            with open(csv_filename, mode='a', newline='') as file:
-                writer = csv.writer(file)
-                # Append the source and destination as a new row
-                writer.writerow(["pendek", source_osmid, dest_osmid])
+        # if self.source_osmid != None and self.dest_osmid != None:        
+        #     # Open the file in append mode ('a')
+        #     with open(csv_filename, mode='a', newline='') as file:
+        #         writer = csv.writer(file)
+        #         # Append the source and destination as a new row
+        #         writer.writerow(["jauh", source_osmid, dest_osmid])
 
     def on_start_clicked(self):
         mode = self.view.get_input_mode()
@@ -116,6 +119,7 @@ class MapController(QObject):
 
         active_algs = self.view.get_selected_algorithms()
         loop_count = self.view.get_loop_count()
+        is_save_traversal = self.view.is_save_traversal()
 
         if not active_algs:
             self.view.show_message(QMessageBox.Icon.Warning, "Gagal!", "Pilih paling tidak 1 algoritma!")
@@ -129,7 +133,8 @@ class MapController(QObject):
                 file_path, 
                 state.indoDbPath, 
                 active_algs,
-                loop_count
+                loop_count,
+                is_save_traversal
             )
         elif mode == "map":
             self.routing_thread = RoutingThread(
@@ -137,7 +142,8 @@ class MapController(QObject):
                 self.dest_osmid, 
                 state.indoDbPath, 
                 active_algs,
-                loop_count
+                loop_count,
+                is_save_traversal
             )
         
         self.view.set_mode_progress()
@@ -211,3 +217,44 @@ class MapController(QObject):
         # (like the JS click count and active markers) will automatically reset too.
         self.view.web_view.load(QUrl.fromLocalFile(self.base_html_path))
         self.view.set_mode_base()
+
+    def _toggle_mode_ui(self):
+        """Memunculkan atau menyembunyikan input file berdasarkan radio button."""
+        is_file_mode = True if self.view.get_input_mode() == "file" else False
+        self.view.file_container.setVisible(is_file_mode)
+        
+        # Kirim sinyal ke JavaScript untuk mengunci atau membuka interaksi klik peta
+        if is_file_mode:
+            self.view.web_view.page().runJavaScript("lockMapInteractions(true);")
+        else:
+            self.view.web_view.page().runJavaScript("lockMapInteractions(false);")
+            self.clear_batch_pinpoints()
+
+    def _open_file_dialog(self):
+        """Membuka dialog untuk memilih file skenario pengujian CSV."""
+        path, _ = self.view.get_file_path()
+
+        if path:
+            self.view.selected_file_path = path
+            filename = os.path.basename(path)
+            self.view.lblFilePath.setText(filename)
+            self.view.lblFilePath.setStyleSheet("color: black; font-weight: bold;")
+            
+            # Pemicu otomatis untuk merender pinpoints setelah file dipilih
+            self.trigger_batch_pinpoints_render()
+
+    def trigger_batch_pinpoints_render(self):
+        """Meminta controller atau internal fungsi untuk merender pinpoints"""
+        if not self.view.selected_file_path: return
+        
+        # Ambil koordinat dari file CSV
+        indo_model = IndonesiaModel()
+        points = indo_model.get_coordinates_from_csv(self.view.selected_file_path)
+        
+        # Tampilkan ke peta melalui JavaScript
+        points_json = json.dumps(points)
+        self.view.web_view.page().runJavaScript(f"renderBatchPinpoints({points_json});")
+
+    def clear_batch_pinpoints(self):
+        """Membersihkan pinpoints eksperimen ketika kembali ke mode manual"""
+        self.view.web_view.page().runJavaScript("clearBatchPinpoints();")

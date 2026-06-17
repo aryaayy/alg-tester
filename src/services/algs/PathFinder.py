@@ -8,5 +8,5 @@ class PathFinder(ABC):
         self.metrics = Metrics()
 
     @abstractmethod
-    def find_shortest_path(self, G: nx.MultiDiGraph, S, D):
+    def find_shortest_path(self, S, D):
         pass

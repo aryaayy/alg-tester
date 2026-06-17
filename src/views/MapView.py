@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QLabel, QSpinBox, QRadioButton, QFileDialog, QProgressBar
 )
 from PySide6.QtCore import QUrl, Qt
+from src.models.IndonesiaModel import IndonesiaModel
 
 class MapView(QWidget):
     def __init__(self, web_channel, map_html_path):
@@ -55,8 +56,8 @@ class MapView(QWidget):
         self.selected_file_path = None
 
         # Menyambungkan logika pergantian UI
-        self.radioMap.toggled.connect(self._toggle_mode_ui)
-        self.btnSelectFile.clicked.connect(self._open_file_dialog)
+        # self.radioMap.toggled.connect(self._toggle_mode_ui)
+        # self.btnSelectFile.clicked.connect(self._open_file_dialog)
 
         # --- EXISTING: Checkboxes ---
         self.bmsspCkBox = QCheckBox(text="BMSSP")
@@ -79,10 +80,13 @@ class MapView(QWidget):
         self.loop_count.setValue(10)       
         self.loop_count.setSingleStep(1)
 
+
         spinBoxLayout = QHBoxLayout()
         spinBoxLayout.addWidget(self.spinbox_label)
         spinBoxLayout.addWidget(self.loop_count)
         spinBoxLayout.setStretch(1, 1)
+
+        self.save_traversal = QCheckBox(text="Simpan Traversal")
 
         self.startButton = QPushButton("Mulai")
 
@@ -91,6 +95,7 @@ class MapView(QWidget):
         routing_layout.addWidget(self.file_container)
         routing_layout.addLayout(optionsLayout)
         routing_layout.addLayout(spinBoxLayout)
+        routing_layout.addWidget(self.save_traversal)
         routing_layout.addWidget(self.startButton)
 
         # ==========================================
@@ -143,25 +148,55 @@ class MapView(QWidget):
         layout.setStretch(0, 1)
     
     # --- NEW: UI Logic Methods ---
-
-    def _toggle_mode_ui(self):
-        """Memunculkan atau menyembunyikan input file berdasarkan radio button."""
-        is_file_mode = self.radioFile.isChecked()
-        self.file_container.setVisible(is_file_mode)
-
-    def _open_file_dialog(self):
-        """Membuka dialog untuk memilih file skenario pengujian CSV."""
-        path, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Pilih File Skenario Uji", 
-            "", 
-            "CSV Files (*.csv)"
+    def get_file_path(self):
+        return QFileDialog.getOpenFileName(
+            self, "Pilih File Skenario Uji", "", "CSV Files (*.csv)"
         )
-        if path:
-            self.selected_file_path = path
-            filename = os.path.basename(path)
-            self.lblFilePath.setText(filename)
-            self.lblFilePath.setStyleSheet("color: black; font-weight: bold;")
+# Tambahkan di bagian bawah fungsi __init__ setelah menghubungkan radio button:
+    # self.radioFile.toggled.connect(self._handle_batch_mode_activated)
+
+    # def _toggle_mode_ui(self):
+    #     """Memunculkan atau menyembunyikan input file berdasarkan radio button."""
+    #     is_file_mode = self.radioFile.isChecked()
+    #     self.file_container.setVisible(is_file_mode)
+        
+    #     # Kirim sinyal ke JavaScript untuk mengunci atau membuka interaksi klik peta
+    #     if is_file_mode:
+    #         self.web_view.page().runJavaScript("lockMapInteractions(true);")
+    #     else:
+    #         self.web_view.page().runJavaScript("lockMapInteractions(false);")
+    #         self.clear_batch_pinpoints()
+
+    # def _open_file_dialog(self):
+    #     """Membuka dialog untuk memilih file skenario pengujian CSV."""
+    #     path, _ = QFileDialog.getOpenFileName(
+    #         self, "Pilih File Skenario Uji", "", "CSV Files (*.csv)"
+    #     )
+    #     if path:
+    #         self.selected_file_path = path
+    #         filename = os.path.basename(path)
+    #         self.lblFilePath.setText(filename)
+    #         self.lblFilePath.setStyleSheet("color: black; font-weight: bold;")
+            
+    #         # Pemicu otomatis untuk merender pinpoints setelah file dipilih
+    #         self.trigger_batch_pinpoints_render()
+
+    # def trigger_batch_pinpoints_render(self):
+    #     """Meminta controller atau internal fungsi untuk merender pinpoints"""
+    #     if not self.selected_file_path: return
+        
+    #     # Ambil koordinat dari file CSV
+    #     indo_model = IndonesiaModel()
+    #     points = indo_model.get_coordinates_from_csv(self.selected_file_path)
+        
+    #     # Tampilkan ke peta melalui JavaScript
+    #     import json
+    #     points_json = json.dumps(points)
+    #     self.web_view.page().runJavaScript(f"renderBatchPinpoints({points_json});")
+
+    # def clear_batch_pinpoints(self):
+    #     """Membersihkan pinpoints eksperimen ketika kembali ke mode manual"""
+    #     self.web_view.page().runJavaScript("clearBatchPinpoints();")
 
     def get_input_mode(self):
         """Mengembalikan 'map' atau 'file' agar Controller tahu mode apa yang aktif."""
@@ -211,6 +246,9 @@ class MapView(QWidget):
     
     def get_loop_count(self):
         return self.loop_count.value()
+    
+    def is_save_traversal(self):
+        return self.save_traversal.isChecked()
 
     def show_message(self, icon, title, text):
         msg = QMessageBox(self)
