@@ -94,14 +94,14 @@ class MapController(QObject):
         self.source_osmid = source_osmid
         self.dest_osmid = dest_osmid
         
-        # csv_filename = "D:/Arya/Skripsi/alg_tester/test/jauhcoba.csv"
+        csv_filename = "D:/Arya/Skripsi/alg_tester/test/vessel.csv"
 
-        # if self.source_osmid != None and self.dest_osmid != None:        
-        #     # Open the file in append mode ('a')
-        #     with open(csv_filename, mode='a', newline='') as file:
-        #         writer = csv.writer(file)
-        #         # Append the source and destination as a new row
-        #         writer.writerow(["jauh", source_osmid, dest_osmid])
+        if self.source_osmid != None and self.dest_osmid != None:        
+            # Open the file in append mode ('a')
+            with open(csv_filename, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                # Append the source and destination as a new row
+                writer.writerow([source_osmid, dest_osmid])
 
     def on_start_clicked(self):
         mode = self.view.get_input_mode()
@@ -130,8 +130,7 @@ class MapController(QObject):
         # 3. Create and Start the Background Thread
         if mode == "file":
             self.routing_thread = BatchRoutingThread(
-                file_path, 
-                state.indoDbPath, 
+                file_path,
                 active_algs,
                 loop_count,
                 is_save_traversal
@@ -139,8 +138,7 @@ class MapController(QObject):
         elif mode == "map":
             self.routing_thread = RoutingThread(
                 self.source_osmid, 
-                self.dest_osmid, 
-                state.indoDbPath, 
+                self.dest_osmid,
                 active_algs,
                 loop_count,
                 is_save_traversal

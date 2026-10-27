@@ -97,17 +97,24 @@ class MapService:
                 window.batchMarkersLayer.clearLayers();
                 if (pointsList.length === 0) return;
 
+                // --- LOGIKA URUTAN Z-INDEX (DRAWING ORDER) ---
+                // Pisahkan array agar destination digambar lebih dulu, dan source digambar terakhir (di atas)
+                let destPoints = pointsList.filter(p => p.type !== "source");
+                let sourcePoints = pointsList.filter(p => p.type === "source");
+                let sortedPoints = destPoints.concat(sourcePoints);
+
                 let bounds = [];
-                pointsList.forEach(function(point) {
+                
+                // Gunakan sortedPoints yang sudah diurutkan
+                sortedPoints.forEach(function(point) {
                     
-                    // --- LOGIKA WARNA BARU ---
                     // Hijau (#28a745) untuk Source, Merah (#dc3545) untuk Dest
                     let markerColor = (point.type === "source") ? "#28a745" : "#dc3545";
                     
                     let marker = L.circleMarker([point.lat, point.lon], {
-                        radius: 6,                 // Sedikit diperbesar agar lebih jelas
-                        fillColor: markerColor,    // Menggunakan warna dinamis
-                        color: "#ffffff",          // Outline putih agar menonjol
+                        radius: 6,
+                        fillColor: markerColor,
+                        color: "#ffffff",
                         weight: 2,
                         opacity: 1,
                         fillOpacity: 0.9
@@ -216,11 +223,12 @@ class MapService:
         print(f"Building animated map with {len(traversal_coords)} dots...")
 
         # 1. Create the base map
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=13, tiles="CartoDB positron")
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=10, tiles="CartoDB positron")
         
         # 2. Draw the Final Winning Path
+        # Secara default, Folium akan menggambar ini di 'overlayPane' Leaflet (z-index: 400)
         if final_path_coords:
-            folium.PolyLine(final_path_coords, color="#28a745", weight=5, opacity=0.8).add_to(m)
+            folium.PolyLine(final_path_coords, color="#28a745", weight=5, opacity=1).add_to(m)
 
         # 3. Inject the JavaScript Animation
         if traversal_coords:
@@ -233,6 +241,11 @@ class MapService:
                     var myMap = window[mapKey];
                     if (!myMap) return;
 
+                    // --- SOLUSI Z-INDEX: Membuat custom pane untuk titik animasi biru ---
+                    // Kita atur z-index ke 399 agar selalu berada di BAWAH overlayPane (400) tempat rute hijau berada
+                    myMap.createPane('traversalPane');
+                    myMap.getPane('traversalPane').style.zIndex = 399;
+
                     var traversalCoords = {coords_json}; 
                     var index = 0;
                     var nodesPerTick = 15; 
@@ -244,8 +257,12 @@ class MapService:
                                 break;
                             }}
                             L.circleMarker(traversalCoords[index], {{
-                                radius: 3, color: '#007bff', fillColor: '#007bff',
-                                fillOpacity: 0.15, weight: 0
+                                radius: 3, 
+                                color: '#007bff', 
+                                fillColor: '#007bff',
+                                fillOpacity: 0.15, 
+                                weight: 0,
+                                pane: 'traversalPane' // <-- Instruksikan agar dirender di layer bawah
                             }}).addTo(myMap);
                             index++;
                         }}

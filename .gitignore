@@ -3,3 +3,6 @@ __pycache__/
 database/
 temp/
 test/
+scripts/
+src/assets/uml/
+out/

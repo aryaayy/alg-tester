@@ -1,8 +1,10 @@
 from src.services.algs.SSSP import Dijkstra, AStar, BiDijkstra, BiAStar, BMSSP
 from src.services.algs.PathFinder import PathFinder
+from src.services.algs.InMemoryGraph import InMemoryGraph
 from PySide6.QtCore import QThread, Signal
 from src.models.HistoryModel import HistoryModel
 from src.models.PathModel import PathModel
+from src.models.IndonesiaModel import IndonesiaModel
 import datetime
 import csv
 
@@ -10,11 +12,10 @@ class RoutingThread(QThread):
     routing_finished = Signal(dict)
     progress_updated = Signal(int, str) # 1. TAMBAHKAN SINYAL BARU DI SINI
 
-    def __init__(self, source_osmid, dest_osmid, db_path, active_algs, loop_count, is_save_traversal):
+    def __init__(self, source_osmid, dest_osmid, active_algs, loop_count, is_save_traversal):
         super().__init__()
         self.source_osmid = source_osmid
         self.dest_osmid = dest_osmid
-        self.db_path = db_path
         self.active_algs = active_algs
         self.loop_count = loop_count
         self.is_save_traversal = is_save_traversal
@@ -39,6 +40,9 @@ class RoutingThread(QThread):
         current_step = 0
 
         try:
+            db = IndonesiaModel()
+            G = InMemoryGraph(db)
+            G.load_data()
             for i in range(self.loop_count):
                 for alg_name in self.active_algs:
                     if alg_name not in self.alg_classes:
@@ -49,8 +53,8 @@ class RoutingThread(QThread):
                     pesan = f"Iterasi {i+1}/{self.loop_count} | Menjalankan {alg_name.upper()}..."
                     self.progress_updated.emit(percent, pesan)
                     
-                    solver = self.alg_classes[alg_name]()
-                    result = solver.find_shortest_path(self.source_osmid, self.dest_osmid, self.db_path)
+                    solver: PathFinder = self.alg_classes[alg_name]()
+                    result = solver.find_shortest_path(G, self.source_osmid, self.dest_osmid, self.is_save_traversal)
                     
                     results[i][alg_name] = {
                         "distance": result["distance"], 
@@ -130,10 +134,9 @@ class BatchRoutingThread(QThread):
     progress_updated = Signal(int, str) # Sinyal untuk ProgressBar (persentase, pesan)
     routing_finished = Signal(str)        # Mengirimkan teks ringkasan (summary) ke UI
 
-    def __init__(self, csv_file_path, db_path, active_algs, loop_count, is_save_traversal):
+    def __init__(self, csv_file_path, active_algs, loop_count, is_save_traversal):
         super().__init__()
         self.csv_file_path = csv_file_path
-        self.db_path = db_path
         self.active_algs = active_algs
         self.loop_count = loop_count
         self.is_save_traversal = is_save_traversal
@@ -169,6 +172,9 @@ class BatchRoutingThread(QThread):
         total_success = 0
         
         try:
+            db = IndonesiaModel()
+            G = InMemoryGraph(db)
+            G.load_data()
             # 2. EKSEKUSI SKENARIO
             for idx, scenario in enumerate(scenarios):
                 kategori = scenario.get('kategori', f"Row_{idx+1}")
@@ -184,7 +190,7 @@ class BatchRoutingThread(QThread):
 
                         solver: PathFinder = self.alg_classes[alg_name]()
 
-                        result = solver.find_shortest_path(source, dest, self.db_path)
+                        result = solver.find_shortest_path(G, source, dest, self.is_save_traversal)
 
                         current_task += 1
                         
@@ -318,7 +324,7 @@ class BatchRoutingThread(QThread):
 
 #                     solver: PathFinder = self.alg_classes[alg_name]()
 
-#                     result = solver.find_shortest_path(source, dest, self.db_path)
+#                     result = solver.find_shortest_path(source, dest, self.is_save_traversal)
                     
 #                     total_dist = result['distance'] 
 #                     total_time += solver.metrics.exec_time

@@ -73,7 +73,7 @@ class HistoryController:
         #     center_lon = final_path_coords[0][1] # First row, Lon column
         # else:
             # Fallback to Jakarta if something went wrong
-        center_lat, center_lon = traversal_coords[0][0], traversal_coords[0][1]
+        center_lat, center_lon = final_path_coords[0][0], final_path_coords[0][1]
             # center_lat, center_lon = -6.2, 106.8
 
         # 3. Pass it to the map

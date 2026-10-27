@@ -1,12 +1,8 @@
 from src.views.MainWindow import MainWindow
 from src.views.LoadingView import LoadingView
 from src.views.components import ExportPopup
-from src.controllers.HomeController import HomeController
-from src.controllers.HelpController import HelpController
 from src.controllers.MapController import MapController
 from src.controllers.HistoryController import HistoryController
-from src.models.HistoryModel import HistoryModel
-import csv
 from src.services.ExportService import *
 
 class AppController:
@@ -26,8 +22,6 @@ class AppController:
     def initApp(self):
         # 1. Initialize all controllers ONCE
         self.loadingView = LoadingView()
-        self.homeController = HomeController(self)
-        self.helpController = HelpController(self)
         self.mapController = MapController(self)
         self.historyController = HistoryController(self)
 
@@ -35,12 +29,6 @@ class AppController:
         self.loadingView.show()
 
     def unlock_app(self):
-        self.mainWindow.stack.addWidget(self.homeController.view)
-        self.pages["HomeView"] = self.homeController.view
-
-        self.mainWindow.stack.addWidget(self.helpController.view)
-        self.pages["HelpView"] = self.helpController.view
-
         self.mainWindow.stack.addWidget(self.mapController.view)
         self.pages["MapView"] = self.mapController.view
 

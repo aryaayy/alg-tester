@@ -6,7 +6,61 @@ class IndonesiaModel:
     def __init__(self):
         self.conn = sqlite3.connect(state.indoDbPath)
         self.c = self.conn.cursor()
-        
+
+    def nodes(self):
+        self.c.execute("SELECT osmid, y, x FROM nodes")
+        return self.c.fetchall()
+
+    def edges(self):
+        self.c.execute("SELECT source, target, MIN(length) FROM edges GROUP BY source, target")
+        return self.c.fetchall()
+    
+    def nodes_count(self):
+        self.c.execute("SELECT COUNT(*) FROM nodes")
+        return self.c.fetchone()[0]
+
+    def coords(self, osmid):
+        self.c.execute("SELECT y, x FROM nodes WHERE osmid = ?", (osmid,))
+        return self.c.fetchone()
+
+    def successors(self, osmid):
+        self.c.execute("""
+            SELECT target, MIN(length) 
+            FROM edges 
+            WHERE source = ? 
+            GROUP BY target
+        """, (osmid,))
+        return self.c.fetchall()
+
+    def predecessors(self, osmid):
+        self.c.execute("""
+            SELECT source, MIN(length) 
+            FROM edges 
+            WHERE target = ? 
+            GROUP BY source
+        """, (osmid,))
+        return self.c.fetchall()
+
+    def successors_with_coords(self, osmid):
+        self.c.execute("""
+            SELECT e.target, MIN(e.length), n.y, n.x
+            FROM edges e
+            JOIN nodes n ON e.target = n.osmid
+            WHERE e.source = ?
+            GROUP BY e.target
+        """, (osmid,))
+        return self.c.fetchall()
+
+    def predecessors_with_coords(self, osmid):
+        self.c.execute("""
+            SELECT e.source, MIN(e.length), n.y, n.x
+            FROM edges e
+            JOIN nodes n ON e.source = n.osmid
+            WHERE e.target = ?
+            GROUP BY e.source
+        """, (osmid,))
+        return self.c.fetchall()
+
     def get_coordinates_from_csv(self, csv_file_path):
         """Membaca CSV dan mengambil koordinat lat/lon dari SQLite berdasarkan OSMID"""
         with self.conn:
